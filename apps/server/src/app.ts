@@ -14,6 +14,8 @@ import { languageRequest, resolveRequestLocale, runWithLocale, setLocaleFallback
 import { detectLocale, normalizeLocale } from "@toonflow/i18n";
 
 const autoInstallProviders = ["tfRouter.ts", "apiMart.ts", "metaso.ts", "compshare.ts"];
+// ACT: 这些内置供应商的模型由用户在界面中添加，升级适配代码时保留已保存的模型。
+const modelPreservingProviders = ["runningHub.ts"];
 
 export async function createApp({
   webRoot,
@@ -66,6 +68,14 @@ export async function createApp({
       providerRevision = hash.digest("hex");
     }
     await initializePlugins(resolve(dataDirectory, "providers"), sourceDirectory, autoInstallProviders, providerRevision);
+    const { syncMediaProviderSource } = await import("@/utils/media/provider");
+    for (const name of modelPreservingProviders) {
+      const bundled = await readFile(resolve(sourceDirectory, name), "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return "";
+        throw error;
+      });
+      if (bundled) await syncMediaProviderSource(name, bundled);
+    }
   }
   // ACT: 技能和团队只补首次安装，保留用户修改。
   if (dataDirectory && skillsRoot) await initializePlugins(resolve(dataDirectory, "skills"), skillsRoot);

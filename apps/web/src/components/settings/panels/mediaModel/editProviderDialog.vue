@@ -46,6 +46,16 @@
       <el-button type="primary" :icon="IconDeviceFloppy" :loading="saving" :disabled="!formApi" @click="saveModels">保存</el-button>
     </template>
     <component
+      v-if="isRunningHub && runningHubModelDialog"
+      :is="runningHubModelDialog"
+      v-model="modelEditorVisible"
+      :model="editingModelIndex === undefined ? undefined : models[editingModelIndex]"
+      :models="models"
+      :config="editorConfig"
+      :fileName="provider?.fileName ?? ''"
+      @confirmed="confirmModel" />
+    <component
+      v-else-if="!isRunningHub && modelEditorDialog"
       :is="modelEditorDialog"
       v-model="modelEditorVisible"
       :model="editingModelIndex === undefined ? undefined : models[editingModelIndex]"
@@ -69,6 +79,8 @@ import { invalidateNodeModels } from "@toonflow/nodes-scaffold/nodeAi";
 
 const { provider } = defineProps<{ provider?: MediaProvider }>();
 const modelEditorDialog = shallowRef<Component>();
+const runningHubModelDialog = shallowRef<Component>();
+const isRunningHub = computed(() => provider?.id === "runningHub");
 const visible = defineModel<boolean>({ default: false });
 const emit = defineEmits<{ saved: [provider: MediaProvider] }>();
 const models = ref<MediaProviderModel[]>([]);
@@ -78,6 +90,7 @@ const saving = ref(false);
 const formApi = shallowRef<Api>();
 const formRules = shallowRef<ReturnType<typeof formCreate.copyRules>>([]);
 const formValues = ref<Record<string, unknown>>({});
+const editorConfig = ref<Record<string, unknown>>({});
 const formOptions = computed<Options>(() => ({ form: { labelPosition: "top", disabled: saving.value }, appendValue: false, submitBtn: false, resetBtn: false }));
 const revision = ref("");
 const formError = ref("");
@@ -110,7 +123,9 @@ function modelTags(model: MediaProviderModel) {
 }
 
 function editModel(index?: number) {
-  modelEditorDialog.value ??= defineAsyncComponent(() => import("./modelEditorDialog.vue"));
+  editorConfig.value = JSON.parse(JSON.stringify(formApi.value ? formApi.value.formData() : toRaw(formValues.value)));
+  if (isRunningHub.value) runningHubModelDialog.value ??= defineAsyncComponent(() => import("./runningHubModelDialog.vue"));
+  else modelEditorDialog.value ??= defineAsyncComponent(() => import("./modelEditorDialog.vue"));
   editingModelIndex.value = index;
   modelEditorVisible.value = true;
 }

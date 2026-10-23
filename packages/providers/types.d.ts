@@ -30,6 +30,22 @@ interface ProviderFormRule {
   value: unknown;
 }
 
+/** 工作流节点的可覆盖输入字段；数组值代表节点连线，不属于可覆盖字段。 */
+interface ProviderWorkflowNodeInput {
+  name: string;
+  valueType: "string" | "number" | "boolean";
+  /** 工作流当前的字段值，界面用作固定值默认值。 */
+  value: string | number | boolean;
+}
+
+/** 工作流节点元数据，仅用于界面配置绑定，不持久化节点列表。 */
+interface ProviderWorkflowNode {
+  nodeId: string;
+  classType: string;
+  title: string;
+  inputs: ProviderWorkflowNodeInput[];
+}
+
 type ProviderConfig<TRules extends readonly ProviderFormRule[]> = {
   [TRule in TRules[number] as TRule["field"]]: TRule["value"];
 };
@@ -223,6 +239,8 @@ interface ProviderDefinition<TRules extends readonly ProviderFormRule[] = readon
   getPrice?: (this: ProviderContext<ProviderConfig<TRules>>, request: ProviderPriceRequest) => Promise<ProviderPrice | null>;
   /** 查询当前配置账户的余额；计价单位由供应商返回。 */
   getBalance?: (this: ProviderContext<ProviderConfig<TRules>>) => Promise<ProviderBalance>;
+  /** 同步平台工作流节点，仅供宿主受控路由调用；返回值用于界面绑定配置，不持久化。 */
+  getWorkflowNodes?: (this: ProviderContext<ProviderConfig<TRules>>, workflowId: string) => Promise<ProviderWorkflowNode[]>;
   /** 未实现的方法保持缺省，调用方据此判断能力是否可用。 */
   generateImage?: GenerateMedia<ImageRequest, ProviderConfig<TRules>>;
   generateVideo?: GenerateMedia<VideoRequest, ProviderConfig<TRules>>;

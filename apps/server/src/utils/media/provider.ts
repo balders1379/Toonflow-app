@@ -290,6 +290,17 @@ export async function addMediaProvider(source: string) {
   return result;
 }
 
+/** 只替换 models 源码区间，保留供应商函数及其余用户编辑。 */
+function withModels(source: string, models: z.infer<typeof mediaModelsSchema>) {
+  const { object, modelProperty } = parseProvider(source);
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const formatted = JSON.stringify(models, null, 2).replace(/\n/g, `${newline}  `);
+  const start = modelProperty?.type === "ObjectProperty" ? modelProperty.value.start! : object.start! + 1;
+  const end = modelProperty?.type === "ObjectProperty" ? modelProperty.value.end! : start;
+  const replacement = modelProperty ? formatted : `${newline}  models: ${formatted},`;
+  return source.slice(0, start) + replacement + source.slice(end);
+}
+
 export async function saveMediaProvider(fileName: string, models: z.infer<typeof mediaModelsSchema>, revision: string, expectedApiKey?: string) {
   if (!mediaProviderFileSchema.safeParse(fileName).success) invalid("供应商文件名无效");
   const checked = mediaModelsSchema.safeParse(models, validationOptions());
@@ -300,18 +311,39 @@ export async function saveMediaProvider(fileName: string, models: z.infer<typeof
   try {
     const current = await readProvider(path, fileName);
     if (current.revision !== revision) invalid("供应商文件已被修改，请刷新页面后再编辑", 409);
-    const { object, modelProperty } = parseProvider(current.source);
-    const newline = current.source.includes("\r\n") ? "\r\n" : "\n";
-    const formatted = JSON.stringify(checked.data, null, 2).replace(/\n/g, `${newline}  `);
-    const start = modelProperty?.type === "ObjectProperty" ? modelProperty.value.start! : object.start! + 1;
-    const end = modelProperty?.type === "ObjectProperty" ? modelProperty.value.end! : start;
-    const replacement = modelProperty ? formatted : `${newline}  models: ${formatted},`;
-    // ACT: 只替换 models 源码区间，保留供应商函数及其余用户编辑。
-    const source = current.source.slice(0, start) + replacement + current.source.slice(end);
+    const source = withModels(current.source, checked.data);
     const result = metadata(fileName, source);
     if (expectedApiKey !== undefined && getMediaProviderApiKey(result.id) !== expectedApiKey) invalid("供应商配置已变更，请重试", 409);
     await writeWorkspaceFile(join(path, fileName), source);
     return result;
+  } finally { release(); }
+}
+
+/**
+ * 已安装的内置供应商随构建更新适配代码，但保留用户在界面中添加的模型。
+ * 未安装或文件无法解析时保持原样，避免覆盖用户内容。
+ */
+export async function syncMediaProviderSource(fileName: string, bundledSource: string) {
+  if (!mediaProviderFileSchema.safeParse(fileName).success) return false;
+  const path = await directory();
+  if (!path) return false;
+  const release = lockWorkspaceFiles([join(path, fileName)]);
+  try {
+    const current = await readProvider(path, fileName).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!current) return false;
+    let models: z.infer<typeof mediaModelsSchema>;
+    try {
+      models = parseProvider(current.source).models;
+    } catch {
+      return false;
+    }
+    const merged = withModels(bundledSource, models);
+    if (current.source === merged) return false;
+    await writeWorkspaceFile(join(path, fileName), merged);
+    return true;
   } finally { release(); }
 }
 
