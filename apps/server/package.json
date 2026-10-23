@@ -20,9 +20,9 @@
   },
   "scripts": {
     "routes": "bun src/core.ts",
-    "dev": "NODE_ENV=dev bun --watch src/index.ts",
+    "dev": "NODE_ENV=dev bun --env-file=../../.env --watch src/index.ts",
     "build": "bun scripts/build.ts",
-    "start": "bun ../../build/server/index.js",
+    "start": "bun --env-file=../../.env ../../build/server/index.js",
     "typecheck": "tsc"
   },
   "dependencies": {

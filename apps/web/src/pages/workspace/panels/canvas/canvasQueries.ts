@@ -15,6 +15,22 @@ export function isCanvasRead(name: string) {
   return readNames.has(name);
 }
 
+// ACT: 局域网 HTTP 页面没有 crypto.subtle；该摘要只用于分页游标校验，改用稳定的非加密摘要。
+async function digestKey(value: string) {
+  if (globalThis.crypto?.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 function jsonSize(value: unknown, limit = responseBytes) {
   let remaining = limit;
   const ancestors = new Set<object>();
@@ -160,9 +176,8 @@ export function createCanvasQueries(source: {
       canvases: (args as { include?: string[] }).include?.includes("canvases") ? await source.canvases(signal) : [],
       types: (args as { include?: string[] }).include?.includes("nodeTypes") ? source.nodeTypes() : [],
     } : undefined;
-    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(JSON.stringify([name, filters, metadata])));
+    const key = await digestKey(JSON.stringify([name, filters, metadata]));
     signal.throwIfAborted();
-    const key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
     const revision = name === "getCanvasEdges" ? source.edgeRevision() : name === "getNodeTools" ? `${source.nodeRevision()}:${source.nodeTools().version}` : source.nodeRevision();
     let offset = 0;
     if (cursor) {

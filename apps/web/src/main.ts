@@ -1,3 +1,5 @@
+// 必须最先导入：局域网 HTTP 页面在其余模块加载前补齐 crypto.randomUUID。
+import "@/lib/randomUUID";
 import { createApp, h, nextTick, ref } from "vue";
 import { ElButton, ElResult } from "element-plus";
 import { createPinia } from "pinia";

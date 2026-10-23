@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { createApp } from "./app";
+import { getLanUrls, isLanAccessEnabled } from "./lib/localAccess";
 import config from "../../../electrobun.config";
 
 const startTime = Date.now();
@@ -29,4 +30,10 @@ app.listen(realPort, async (error?: Error) => {
   await startMobileLinkRuntime(app).catch(error => console.error("设备互联启动失败：", error));
   console.log(`[服务启动成功]: http://localhost:${realPort}`);
   console.log(`[启动耗时]: ${(Date.now() - startTime).toFixed(2)}ms`);
+  if (isLanAccessEnabled()) {
+    console.warn("[局域网访问] 已开启 TOONFLOW_ALLOW_LAN=1：任何能访问下列地址的设备都可控制本服务，且没有登录鉴权");
+    const urls = getLanUrls(realPort);
+    if (urls.length) for (const url of urls) console.log(`[局域网地址]: ${url}`);
+    else console.warn("[局域网访问] 未检测到本机私网地址；使用域名、反向代理或 Docker 时请设置 TOONFLOW_LAN_HOSTS=<主机名或 IP>");
+  }
 });

@@ -6,6 +6,7 @@ import conf from "@/utils/conf";
 import { getAppOrigin } from "@/utils/mcp/control";
 import { isWithin } from "@/utils/workspace/files";
 import { getRuntimePlatform } from "@/lib/platform";
+import { isTrustedLanHost, isTrustedProxyRequest } from "@/lib/localAccess";
 import { thinkingLevels, type ThinkingLevel } from "@/lib/modelReasoning";
 
 export type A2aSettings = {
@@ -54,7 +55,8 @@ export async function resolveA2aWorkspace(path = getA2aSettings().directory) {
 export function authenticateA2a(req: Request) {
   const { enabled, token } = getA2aSettings();
   if (!enabled || token.length < 32) return;
-  if (getRuntimePlatform().requiresLocalHost && !["localhost", "127.0.0.1", "[::1]"].includes(req.hostname)) return;
+  if (getRuntimePlatform().requiresLocalHost && !["localhost", "127.0.0.1", "[::1]"].includes(req.hostname)
+    && !isTrustedLanHost(req) && !isTrustedProxyRequest(req)) return;
   if (req.get("origin")) {
     try { getAppOrigin(req); } catch { return; }
   }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import conf from "@/utils/conf";
 import { isMobileLinkRequest } from "@/utils/mobileLink";
 import { getRuntimePlatform } from "@/lib/platform";
+import { isTrustedLanHost, isTrustedProxyRequest } from "@/lib/localAccess";
 
 export const controlStateSchema = z.object({
   directory: z.string().max(4096).nullable(),
@@ -32,7 +33,8 @@ export function getMcpSettings() {
 }
 
 function allowedHost(req: Request) {
-  return isMobileLinkRequest(req) || !getRuntimePlatform().requiresLocalHost || ["localhost", "127.0.0.1", "[::1]"].includes(req.hostname);
+  return isMobileLinkRequest(req) || !getRuntimePlatform().requiresLocalHost || ["localhost", "127.0.0.1", "[::1]"].includes(req.hostname)
+    || isTrustedLanHost(req) || isTrustedProxyRequest(req);
 }
 
 export function getAppOrigin(req: Request) {
@@ -41,7 +43,9 @@ export function getAppOrigin(req: Request) {
   let url: URL;
   try { url = new URL(source); }
   catch { throw Object.assign(new Error("页面来源无效"), { status: 403 }); }
-  if (!["http:", "https:"].includes(url.protocol) || url.host !== req.get("host")) throw Object.assign(new Error("页面来源与服务地址不一致"), { status: 403 });
+  if (!["http:", "https:"].includes(url.protocol) || (url.host !== req.get("host") && !isTrustedProxyRequest(req))) {
+    throw Object.assign(new Error("页面来源与服务地址不一致"), { status: 403 });
+  }
   return url.origin;
 }
 
