@@ -21,6 +21,8 @@ interface ProviderModel {
   audio?: "optional" | boolean;
   imageSizes?: string[];
   imageRatios?: string[];
+  /** 视频画面比例选项；可包含供应商枚举的完整标签（如 "16:9 (Widescreen)"），生成时原样提交。 */
+  videoRatios?: string[];
   durationResolutionMap?: { duration: number[]; resolution: string[] }[];
   voices?: { title: string; voice: string }[];
 }

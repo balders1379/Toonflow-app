@@ -30,6 +30,11 @@ function imageOptions(value: unknown, pattern: RegExp) {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && item.length <= 64 && item === item.trim() && pattern.test(item)))] : undefined;
 }
 
+// ACT: 视频比例选项可能是供应商枚举的完整标签（如 "16:9 (Widescreen)"），只校验字符串本身。
+function optionLabels(value: unknown) {
+  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && item.length <= 64 && item === item.trim() && /^[^\u0000-\u001f\u007f]+$/.test(item)))].slice(0, 64) : undefined;
+}
+
 export async function listMediaModels(): Promise<MediaModel[]> {
   const installedProviders = await listMediaProviders();
   return installedProviders.flatMap(provider => provider.models.flatMap(model => {
@@ -44,6 +49,10 @@ export async function listMediaModels(): Promise<MediaModel[]> {
         imageSizes: imageOptions(Array.isArray(model.imageSizes) ? model.imageSizes : builtIn?.imageSizes, /^[^\u0000-\u001f\u007f]+$/),
         imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
       } : {}),
+      ...(model.type === "video" ? (() => {
+        const videoRatios = optionLabels(Array.isArray(model.videoRatios) ? model.videoRatios : builtIn?.videoRatios);
+        return videoRatios?.length ? { videoRatios } : {};
+      })() : {}),
     } as MediaModel];
   }));
 }

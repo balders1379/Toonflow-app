@@ -152,9 +152,33 @@ const generationState = useNodeGeneration(outputs, () => generationController?.a
 const { generating } = generationState;
 let generation: Promise<void> | undefined;
 let modelsRequest: Promise<void> | undefined;
-// ACT: 供应商未声明视频比例范围，沿用界面的通用比例，具体支持范围由供应商校验。
-const ratioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
+// ACT: 模型声明 videoRatios 时使用其原始选项，否则沿用界面的通用比例。
+const defaultRatioOptions = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 const selectedModel = computed(() => models.value.find((item) => JSON.stringify([item.providerId, item.modelId]) === data.value.model));
+
+function ratioPrefix(value: string) {
+  return /^([1-9]\d{0,3}:[1-9]\d{0,3})(?=\D|$)/.exec(value)?.[1];
+}
+
+function getRatioOptions(choice?: NodeMediaModel) {
+  const configured = choice?.videoRatios?.filter(item => typeof item === "string" && item.trim());
+  return configured?.length ? configured : defaultRatioOptions;
+}
+
+const ratioOptions = computed(() => getRatioOptions(selectedModel.value));
+
+function resolveRatio(choice: NodeMediaModel | undefined, value: string) {
+  const options = getRatioOptions(choice);
+  if (options.includes(value)) return value;
+  const prefix = ratioPrefix(value);
+  return prefix ? options.find(option => ratioPrefix(option) === prefix) : undefined;
+}
+
+function fallbackRatio(choice: NodeMediaModel | undefined) {
+  const options = getRatioOptions(choice);
+  if (choice?.videoRatios?.length) return options[0] ?? "9:16";
+  return options.includes("9:16") ? "9:16" : options[0] ?? "9:16";
+}
 const selectedMode = computed(() => selectedModel.value?.mode?.find((item) => JSON.stringify(item) === data.value.mode) as NodeVideoRequest["mode"]);
 const frameMode = computed(() => ["startEndRequired", "endFrameOptional", "startFrameOptional"].includes(String(selectedMode.value)));
 const mediaCounts = computed(() => ({
@@ -203,7 +227,7 @@ watch([selectedModel, () => data.value.duration], ([choice]) => {
   if (!durations.includes(data.value.duration!)) data.value.duration = durations[0];
   const resolutions = getResolutions(choice, data.value.duration);
   if (!resolutions.includes(data.value.resolution)) data.value.resolution = resolutions[0] ?? "";
-  if (!ratioOptions.includes(data.value.ratio)) data.value.ratio = "9:16";
+  data.value.ratio = resolveRatio(choice, data.value.ratio) ?? fallbackRatio(choice);
   if (choice.audio !== "optional") data.value.generateAudio = choice.audio === true;
 }, { flush: "sync" });
 const modelGroups = computed(() => groupNodeModels(models.value));
@@ -373,14 +397,14 @@ function getConfig() {
       generateAudio: data.value.generateAudio,
     },
     models: models.value,
-    ratios: ratioOptions,
+    ratios: ratioOptions.value,
     matchingModes: matchingModes.value,
   };
 }
 
 nodeTools.register({
   name: "getConfig",
-  description: "读取此视频生成节点的当前配置、可选视频模型能力、通用比例及适合当前引用的模式，不含密钥；时长与分辨率须符合 durationResolutionMap",
+  description: "读取此视频生成节点的当前配置、可选视频模型能力、比例选项及适合当前引用的模式，不含密钥；比例使用返回的 ratios 原始值，时长与分辨率须符合 durationResolutionMap",
   parameters: z.strictObject({}),
   async execute(_args, { signal }) {
     signal?.throwIfAborted();
@@ -392,13 +416,13 @@ nodeTools.register({
 
 nodeTools.register({
   name: "setConfig",
-  description: "修改此视频生成节点的模型、时长、分辨率、比例、模式或声音；先用 getConfig 查询能力，providerId 与 modelId 必须同时提供；mode 使用返回的原始字符串或数组，须匹配当前引用；不修改提示词、不启动生成",
+  description: "修改此视频生成节点的模型、时长、分辨率、比例、模式或声音；先用 getConfig 查询能力，providerId 与 modelId 必须同时提供；比例使用 ratios 中的原始值，mode 使用返回的原始字符串或数组，须匹配当前引用；不修改提示词、不启动生成",
   parameters: z.strictObject({
     providerId: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),
     duration: z.number().positive().optional(),
     resolution: z.string().min(1).optional(),
-    ratio: z.enum(ratioOptions).optional(),
+    ratio: z.string().trim().min(1).max(64).optional(),
     mode: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
     generateAudio: z.boolean().optional(),
   }).refine((args) => (args.providerId === undefined) === (args.modelId === undefined), "providerId 与 modelId 必须同时提供"),
@@ -417,12 +441,15 @@ nodeTools.register({
     const resolutions = getResolutions(choice, duration);
     if (args.resolution !== undefined && !resolutions.includes(args.resolution)) throw new Error(`当前时长不支持分辨率 ${args.resolution}，可选：${resolutions.join("、")}`);
     const resolution = args.resolution ?? (resolutions.includes(data.value.resolution) ? data.value.resolution : resolutions[0] ?? "");
+    const ratios = getRatioOptions(choice);
+    const ratio = args.ratio === undefined ? undefined : resolveRatio(choice, args.ratio);
+    if (args.ratio !== undefined && !ratio) throw new Error(`当前模型不支持比例 ${args.ratio}，可选：${ratios.join("、")}`);
     if (args.mode !== undefined && !getMatchingModes(choice).some((item) => JSON.stringify(item) === JSON.stringify(args.mode))) throw new Error("所选模式不受当前模型支持或不适用于当前引用，请根据模型能力及已连接素材选择");
     if (args.generateAudio !== undefined && choice.audio !== "optional" && args.generateAudio !== (choice.audio === true)) throw new Error("当前模型不支持切换声音，请查看 getConfig 返回的 audio 能力");
     data.value.model = JSON.stringify([choice.providerId, choice.modelId]);
     data.value.duration = duration;
     data.value.resolution = resolution;
-    if (args.ratio !== undefined) data.value.ratio = args.ratio;
+    data.value.ratio = ratio ?? resolveRatio(choice, data.value.ratio) ?? fallbackRatio(choice);
     if (args.mode !== undefined) data.value.mode = JSON.stringify(args.mode);
     if (args.generateAudio !== undefined) data.value.generateAudio = args.generateAudio;
     return getConfig();

@@ -3,7 +3,7 @@
     <template #reference>
       <el-button class="settingsButton" text size="small" :disabled="disabled" :aria-expanded="settingsVisible" aria-label="视频生成设置">
         <span class="ratioShape" :style="ratioStyle(ratio)" aria-hidden="true" />
-        <span>{{ [ratio, resolution, duration ? `${duration}秒` : ''].filter(Boolean).join(' · ') }}</span>
+        <span>{{ [ratioLabel(ratio), resolution, duration ? `${duration}秒` : ''].filter(Boolean).join(' · ') }}</span>
         <component :is="settingsVisible ? IconChevronDown : IconChevronUp" :size="14" aria-hidden="true" />
       </el-button>
     </template>
@@ -28,10 +28,10 @@
       </div>
       <div class="sectionLabel">通用比例</div>
       <div class="ratioOptions" role="group" aria-label="视频比例">
-        <el-button v-for="item in ratios" :key="item" class="ratioButton" :disabled="disabled" :aria-label="`比例 ${item}`" :aria-pressed="ratio === item" @click="ratio = item">
+        <el-button v-for="item in ratios" :key="item" class="ratioButton" :disabled="disabled" :title="item" :aria-label="`比例 ${item}`" :aria-pressed="ratio === item" @click="ratio = item">
           <span class="ratioContent">
             <span class="ratioShape" :style="ratioStyle(item)" aria-hidden="true" />
-            <span>{{ item }}</span>
+            <span class="ratioText">{{ ratioLabel(item) }}</span>
           </span>
         </el-button>
       </div>
@@ -71,8 +71,17 @@ function resolutionsFor(value: number | undefined) {
   return [...new Set(mappings.value.filter(item => value !== undefined && item.duration.includes(value)).flatMap(item => item.resolution))];
 }
 
+function ratioPrefix(value: string) {
+  return /^([1-9]\d{0,3}:[1-9]\d{0,3})(?=\D|$)/.exec(value)?.[1];
+}
+
+// ACT: 模型可能返回 "16:9 (Widescreen)" 这类带说明的选项，按钮只显示比例前缀。
+function ratioLabel(value: string) {
+  return ratioPrefix(value) ?? value;
+}
+
 function ratioStyle(value: string) {
-  const [width = 1, height = 1] = value.split(":").map(Number);
+  const [width = 1, height = 1] = (ratioPrefix(value) ?? "1:1").split(":").map(Number);
   return { width: `${16 * Math.min(width / height, 1)}px`, height: `${16 * Math.min(height / width, 1)}px` };
 }
 </script>
@@ -137,6 +146,13 @@ function ratioStyle(value: string) {
         align-items: center;
         gap: 8px;
         font-size: 12px;
+      }
+
+      .ratioText {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
   }
