@@ -28,6 +28,7 @@ const referenceMode = z.templateLiteral([z.enum(["image", "video", "audio"]), "R
 export const listMediaModelsSchema = z.strictObject({});
 export const imageGenerationSchema = z.strictObject({
   ...sharedFields,
+  ratio: videoRatio.optional(),
   size: z.string().trim().min(1).max(64).optional(),
 });
 export const videoGenerationSchema = z.strictObject({

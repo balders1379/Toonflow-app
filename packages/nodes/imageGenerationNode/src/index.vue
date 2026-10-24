@@ -79,8 +79,10 @@
             v-if="editor?.mode !== 'inpaint'"
             v-model:size="data.size"
             v-model:ratio="data.ratio"
+            v-model:mode="data.mode"
             :sizes="sizeOptions"
             :ratios="ratioOptions"
+            :model="selectedModel"
             :disabled="generating || deleting || !selectedModel" />
           <el-button v-if="editor?.mode === 'inpaint'" class="confirmButton" type="primary" :icon="IconCheck" :loading="editor.busy" :disabled="deleting || uploading || !generationPrompt" @click="confirmInpaint().catch(error => showNodeError(error, '重绘节点创建失败'))">确认</el-button>
           <div v-else class="generationActions">
@@ -143,7 +145,7 @@ const { id, node, nodeProps, nodeEvent, outputs, files, ai, updateNodeInternals 
   label: "图片生成",
 });
 type PromptModel = NonNullable<InstanceType<typeof promptInput>["$props"]["modelValue"]>;
-const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; inpaint?: ImageInpaint });
+const data = computed(() => node.data as { prompt: string; promptModel: PromptModel; inpaintPrompt: string; inpaintPromptModel: PromptModel; model: string; size: string; ratio: string; mode: string; inpaint?: ImageInpaint });
 data.value.prompt ??= "";
 data.value.promptModel ??= [];
 data.value.inpaintPrompt ??= "";
@@ -151,6 +153,7 @@ data.value.inpaintPromptModel ??= [];
 data.value.model ??= "";
 data.value.size ??= "";
 data.value.ratio ??= "16:9";
+data.value.mode ??= "";
 const { refList, referenceMentions, setReferencePreview, removeReference } = useNodeReferences();
 const models = ref<NodeMediaModel[]>([]);
 const modelsLoading = ref(false);
@@ -178,8 +181,28 @@ const { generating } = generationState;
 let generation: Promise<void> | undefined;
 let modelsRequest: Promise<void> | undefined;
 const selectedModel = computed(() => models.value.find((item) => JSON.stringify([item.providerId, item.modelId]) === data.value.model));
-const sizeOptions = computed(() => (selectedModel.value?.imageSizes?.length ? selectedModel.value.imageSizes : ["2K"]));
-const ratioOptions = computed(() => (selectedModel.value?.imageRatios?.length ? selectedModel.value.imageRatios : ["16:9"]));
+const imageReferenceCount = computed(() => refList.value.filter(item => item.dataType === "IMAGE").length);
+const selectedMode = computed(() => selectedModel.value?.mode?.find(item => JSON.stringify(item) === data.value.mode));
+watch([selectedModel, imageReferenceCount, () => data.value.mode], ([choice, count]) => {
+  const modes = choice?.mode ?? [];
+  if (!modes.length) {
+    data.value.mode = "";
+    return;
+  }
+  const matches = modes.filter(item => {
+    if (item === "text") return count === 0;
+    if (item === "singleImage" || item === "multiReference" || Array.isArray(item)) return count > 0;
+    return true;
+  });
+  if (matches.some(item => JSON.stringify(item) === data.value.mode)) return;
+  const preferred = count > 1 ? matches.find(item => item === "multiReference") : matches.find(item => item === "singleImage");
+  data.value.mode = JSON.stringify(preferred ?? matches[0] ?? modes[0]);
+}, { flush: "sync" });
+const sizeOptions = computed(() => selectedModel.value?.imageSizes ?? ["2K"]);
+const ratioOptions = computed(() => selectedModel.value?.imageRatios ?? ["16:9"]);
+function ratioPrefix(value: string) {
+  return /^([1-9]\d{0,3}:[1-9]\d{0,3})(?=\D|$)/.exec(value)?.[1];
+}
 watch(
   selectedModel,
   (choice) => {
@@ -187,8 +210,9 @@ watch(
     // ACT: 现有分辨率使用 K 单位；出现其他单位时再统一换算，未知名称排在数值选项之后。
     if (!sizeOptions.value.includes(data.value.size)) data.value.size = sizeOptions.value.toSorted((left, right) =>
       (Number.parseFloat(left) || Infinity) - (Number.parseFloat(right) || Infinity)
-    )[0]!;
-    if (!ratioOptions.value.includes(data.value.ratio)) data.value.ratio = ratioOptions.value.includes("16:9") ? "16:9" : ratioOptions.value[0]!;
+    )[0] ?? "";
+    if (!ratioOptions.value.includes(data.value.ratio)) data.value.ratio = ratioOptions.value.find(item => ratioPrefix(item) === ratioPrefix(data.value.ratio))
+      ?? ratioOptions.value.find(item => ratioPrefix(item) === "16:9") ?? ratioOptions.value[0] ?? "";
   },
   { flush: "sync" }
 );
@@ -210,10 +234,10 @@ const generationInput = computed<Omit<NodeImageRequest, "directory"> | undefined
     providerId: choice.providerId,
     modelId: choice.modelId,
     prompt: generationPrompt.value,
-    size: data.value.size,
-    ratio: data.value.ratio,
+    size: data.value.size || undefined,
+    ratio: data.value.ratio || undefined,
     outputDirectory: `assets/${id}`,
-    images: references.flatMap(item => item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
+    images: selectedMode.value === "text" && !inpaint ? [] : references.flatMap(item => item.dataType === "IMAGE" && item.value ? [{ path: item.value.url, mimeType: item.value.mimeType }] : []),
   };
   if (inpaint) {
     let imageIndex = 3 + (inpaint.images?.length ?? 0);
@@ -329,6 +353,7 @@ async function startGeneration() {
   if (!generationPrompt.value) throw new Error("请输入生成提示词");
   const references = refList.value.filter(item => !data.value.inpaint || item.dataType !== "IMAGE" || item.value?.url !== data.value.inpaint.source);
   if (references.some(item => item.value === undefined)) throw new Error("引用节点暂无内容，请先补充引用内容");
+  if (["singleImage", "multiReference"].includes(String(selectedMode.value)) && !references.some(item => item.dataType === "IMAGE" && item.value)) throw new Error("参考生图模式需要参考图片");
   if (!input) throw new Error("请先选择图片模型");
   const workspace = files.getWorkspaceFiles();
   const controller = new AbortController();
@@ -446,8 +471,8 @@ nodeTools.register({
     const choice = args.modelId === undefined ? selectedModel.value
       : models.value.find((item) => item.providerId === args.providerId && item.modelId === args.modelId);
     if (!choice) throw new Error("请选择 getConfig 返回的有效图片模型");
-    const sizes = choice.imageSizes?.length ? choice.imageSizes : ["2K"];
-    const ratios = choice.imageRatios?.length ? choice.imageRatios : ["16:9"];
+    const sizes = choice.imageSizes ?? ["2K"];
+    const ratios = choice.imageRatios ?? ["16:9"];
     if (args.size !== undefined && !sizes.includes(args.size)) throw new Error(`当前模型不支持分辨率 ${args.size}，可选：${sizes.join("、")}`);
     if (args.ratio !== undefined && !ratios.includes(args.ratio)) throw new Error(`当前模型不支持比例 ${args.ratio}，可选：${ratios.join("、")}`);
     data.value.model = JSON.stringify([choice.providerId, choice.modelId]);

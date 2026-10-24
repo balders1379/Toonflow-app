@@ -47,7 +47,7 @@ export async function listMediaModels(): Promise<MediaModel[]> {
       ...(model.type === "audio" ? { voices: model.voices } : {}),
       ...(model.type === "image" ? {
         imageSizes: imageOptions(Array.isArray(model.imageSizes) ? model.imageSizes : builtIn?.imageSizes, /^[^\u0000-\u001f\u007f]+$/),
-        imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
+        imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}(?: \([^()]+\))?$/),
       } : {}),
       ...(model.type === "video" ? (() => {
         const videoRatios = optionLabels(Array.isArray(model.videoRatios) ? model.videoRatios : Array.isArray(model.bindings) ? [] : builtIn?.videoRatios);
