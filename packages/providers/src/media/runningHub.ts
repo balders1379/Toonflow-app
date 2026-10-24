@@ -566,13 +566,16 @@ function bindingFields(binding: InputBinding): BindingField[] {
     : [{ fieldName: binding.fieldName ?? "", source: binding.source ?? "fixed", value: binding.value }];
 }
 
-/** ACT: ResolutionSelector 的 megapixels 是总像素数；图片卡片按 1K/2K 标注，这里做一次换算。 */
+/** ACT: ResolutionSelector 的 megapixels 是总像素数；卡片按 1K/2K、720p 或 1280x720 标注，这里做一次换算。 */
 function sizeToMegapixels(value: string | undefined) {
   const text = typeof value === "string" ? value.trim() : "";
   const k = /^(\d+(?:\.\d+)?)\s*k$/i.exec(text);
   if (k) return Number(k[1]);
   const px = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(text);
   if (px) return Number((Number(px[1]) * Number(px[2]) / 1e6).toFixed(2));
+  // ACT: 视频分辨率常按短边高度标注（如 720p、1080p），按 16:9 估算总像素。
+  const p = /^(\d+)\s*p$/i.exec(text);
+  if (p) return Number((Number(p[1]) ** 2 * 16 / 9 / 1e6).toFixed(2));
   return undefined;
 }
 
@@ -671,7 +674,8 @@ async function runWorkflow(context: Context, request: ImageRequest | VideoReques
           fieldValue = input.size;
           break;
         case "megapixels":
-          fieldValue = sizeToMegapixels(input.size);
+          // ACT: 图片取卡片分辨率（size），视频取所选分辨率（resolution），统一换算成总像素数。
+          fieldValue = sizeToMegapixels(input.size ?? input.resolution);
           break;
         case "duration":
           fieldValue = input.duration;
@@ -751,7 +755,7 @@ export default {
   icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACshmLzAAAENUlEQVRYCcVXXWgcVRT+dmZ3ZmfThG7apEgxVVsSpUJBa6kgSJWATz6IVCKKID5IrT9ERZHiQ1oVixVqEKT4IhgKQlBBqFAQQRQqNrWhUJSS1qrFtDF/u+3+zcz6nZmd2bmb2XQCqT3w7b337Ln3fHPOuffOAKps4XA/cY2orzKucr0RYjOxRFLUvEnMEavtuHW9Wfp4nVDkDY5aDW/0+NWAwe3sLN4EAgv02Zfmz3NEJ6GIpgOaFqgkQ60Sr3MdF64rwbuudNHiaVmlRGRbzfe+q2HwURO1ugUNgqyHVNi3kGro/P99G8c2MDttY/LkJXz5xQmcOX2hdenoeFoIxNJ9Z0zD7ictVNABndCQi2BN2NdDfVOXwRpkGNQC99LI20cxemg86jTaL4RBjmql7zhAja1N1MhRhctxKxzqfJTZu4oyzFwG73+wB4OP7JAl46TelkCctegkERZj4iPNVpDxYFAfFYck09Q9/+LjUbXSlyJMJJIrl1H5anwaxYUZ5t/woDVaXcvi7m2bsH37QCOnfpFWGY1t9wwg392FuVnZbKokJiDT7FodB1+bwqU/K+oqjVHWyuDr71/Czh1bmTq/tFy2a/OdWN+TjyWQOAX+8wCm1X5KuVTD5MRfDLpqk07ryJpGLGnVMtbEV8ZulRj7pHbB1MQEgggEE1erTUwgqUMtFVAN2uVnrphAreq2XXFt3sK9OzexALldGkUoxrbtoFyOL9zEu0Dcpo0URo70o1TMsMxMbkOz0fIE0CwM3HUr7uzf6B1IwZNptJifW8TMlXnhskQSE5CZcjntGlzHKm8eu81juoPHTpZP7yp7wOAhdXrid8yRRJysiIAsUPEcOHTiQ6dLLYTqXCdVu27jk9G2d4FCNo7gEp0E3wih86gNgq2ayhFcXLiG4Vc+wvFvT6h/RkYrikCdhfDrxCIqpTLdFr3ruHdDHgPMe3T/S9h//OEs9j57BFPn/om4W9pNTECes1qtY3joLP44J68Qvmzs68SxX55Cb08uJOEwPZv7b0GtKnfp8hIfv5g5wRM235J8o78vFvDp4VNMS/MmlFuwb0MP3to/FLOSqkpMQJ2mjj77+BR+m5pR6qGEKp4Yegj3P7BVNW4ZJSaw3Lm2MF/B6Hs/KQTqjIKVMbDvwDOQy6idJCYQpKDdQuOfT+LnkxeZimZZlRmFhx+8D4/t3tVumpfRZkVFzAwTfMsRyGtoynvzs7IaUm0oV8o2Phz5zotCB0/IHA8lgUlKBw6+gJ7e7sjqYbcodA8R+0JVo3NsrI7zk1XWc4HuZdsV4NhpzF6WN8V4Of4Nt96eMazvznNH6JyX8WDqOXSv68KVy/JRpMiojG4jbsaHiVwOfYQn8q0maf4/Mey7bv4KCYnRjSbxL32E34Wtu+sO/imnx8tEB3G94qdJIhE/ReIwcZQ4T3jyH+6C1C5Co275AAAAAElFTkSuQmCC",
   version: "1.1.5",
   readme:
-    "RunningHub\n\n使用 ComfyUI 工作流生成图片、视频和音频。国际站与国内站的账号、API Key 可能不通用，请按 Key 来源选择站点。\n\n添加供应商后模型列表为空，请在「编辑模型」中点击「手动添加」：先填写 ComfyUI 工作流 ID 并同步节点，再按参考词、参考图、参考视频/音频、时长、分辨率等参数分组，为每个参数添加一个或多个工作流节点。不需要的节点行设为 None，运行时会向该字段写入 None，禁用工作流默认输入且不占用参考素材。在输入参数和输出节点之间可添加默认参数节点，为节点的每个参数指定固定值，生成时覆盖工作流默认值。最后在输出分组中添加输出节点。\n\n视频模型可勾选支持的生成模式（文生视频、单图参考、首帧参考、尾帧参考、首尾帧参考、混合参考），生成节点会据此显示模式选项；首帧/尾帧参考使用参考图第一行，首尾帧参考按行顺序使用前两行，混合参考的参考数量在模型配置中按需填写（默认 9 张图片、3 个视频和 3 个音频）。「分辨率」分组绑定分辨率选择节点（如 ResolutionSelector 的 aspect_ratio）后，该字段的选项会成为视频卡片的比例选项，生成时原样写入工作流。\n\n图片模型在「分辨率选项」中填写的值会直接显示在图片卡片上；用户选择的 1K、2K 等会换算成数值写入「分辨率（megapixels）」分组绑定的 ResolutionSelector.megapixels。「分辨率」分组绑定 aspect_ratio 后，该字段的选项会成为图片卡片的比例选项，用户选择的比例会写入该节点的 aspect_ratio。同步节点时若工作流中存在 ResolutionSelector，会自动绑定这两个字段；选项留空则卡片不显示对应选择。\n\n参考素材会在每次生成时自动上传到 RunningHub，单文件不超过 30 MB。",
+    "RunningHub\n\n使用 ComfyUI 工作流生成图片、视频和音频。国际站与国内站的账号、API Key 可能不通用，请按 Key 来源选择站点。\n\n添加供应商后模型列表为空，请在「编辑模型」中点击「手动添加」：先填写 ComfyUI 工作流 ID 并同步节点，再按参考词、参考图、参考视频/音频、时长、分辨率等参数分组，为每个参数添加一个或多个工作流节点。不需要的节点行设为 None，运行时会向该字段写入 None，禁用工作流默认输入且不占用参考素材。在输入参数和输出节点之间可添加默认参数节点，为节点的每个参数指定固定值，生成时覆盖工作流默认值。最后在输出分组中添加输出节点。\n\n视频模型可勾选支持的生成模式（文生视频、单图参考、首帧参考、尾帧参考、首尾帧参考、混合参考），生成节点会据此显示模式选项；首帧/尾帧参考使用参考图第一行，首尾帧参考按行顺序使用前两行，混合参考的参考数量按「参考图」「参考视频」「参考音频」分组中启用中的节点自动统计。「分辨率」分组绑定分辨率选择节点（如 ResolutionSelector 的 aspect_ratio）后，该字段的选项会成为视频卡片的比例选项，生成时原样写入工作流；把同一节点的 megapixels 设为「前端设置」后，视频卡片所选分辨率会按 720p、1K、1280x720 这类写法换算成总像素写入。\n\n图片模型在「分辨率选项」中填写的值会直接显示在图片卡片上；用户选择的 1K、2K 等会换算成数值写入「分辨率（megapixels）」分组绑定的 ResolutionSelector.megapixels。「分辨率」分组绑定 aspect_ratio 后，该字段的选项会成为图片卡片的比例选项，用户选择的比例会写入该节点的 aspect_ratio。同步节点时若工作流中存在 ResolutionSelector，会自动绑定这两个字段；选项留空则卡片不显示对应选择。\n\n参考素材会在每次生成时自动上传到 RunningHub，单文件不超过 30 MB。",
   rules,
   models: [],
   async generateImage(this: Context, request: ImageRequest): Promise<MediaAsset[]> {

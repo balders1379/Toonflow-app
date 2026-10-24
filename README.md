@@ -398,8 +398,6 @@ bun run start:server
 
 看到“服务启动成功”后，可在服务器本机访问 `http://127.0.0.1:3000`。上述命令以前台方式运行，按 `Ctrl+C` 停止；需要开机自启和进程托管时，可参考 [Bun 的 systemd 部署指南](https://bun.sh/guides/ecosystem/systemd)，将工作目录设为仓库目录，启动命令设为 Bun 的绝对路径加 `run start:server`，使用有权读写该目录的用户运行。
 
-仓库根目录也提供了启动脚本：`./start.sh` 会在缺少构建产物时自动构建后启动后端，`./start.sh --rebuild` 强制重新构建，`./start.sh --dev` 以开发模式监听后端源码改动；脚本会自动加载根目录 `.env`，例如 `TOONFLOW_SERVER_PORT=4000 ./start.sh` 可指定端口。
-
 </details>
 
 ---

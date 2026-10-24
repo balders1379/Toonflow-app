@@ -26,14 +26,11 @@
               <el-checkbox v-for="item in modeOptions[draft.type]" :key="item.value" :value="item.value">{{ item.label }}</el-checkbox>
             </el-checkbox-group>
             <el-text v-if="draft.type === 'video'" class="fieldHint" type="info" size="small">
-              勾选工作流支持的生成方式，视频节点会据此显示模式选项。首帧/尾帧参考使用「参考图」区域的第一行，首尾帧参考按行顺序使用前两行；它们分别对应视频节点里的「尾帧可选」「首帧可选」「首尾帧必填」。混合参考的参考数量在下方按模型配置。
+              勾选工作流支持的生成方式，视频节点会据此显示模式选项。首帧/尾帧参考使用「参考图」区域的第一行，首尾帧参考按行顺序使用前两行；它们分别对应视频节点里的「尾帧可选」「首帧可选」「首尾帧必填」。混合参考的参考数量按下方输入参数中启用中的参考节点自动统计。
             </el-text>
-            <div v-if="draft.type === 'video' && draft.modes.includes('multiReference')" class="mixedCounts">
-              <label v-for="item in mixedReferenceOptions" :key="item.key">
-                <span>{{ item.label }}</span>
-                <el-input-number v-model="draft.mixedReferenceCounts[item.key]" :min="0" :max="256" :step="1" :precision="0" size="small" controlsPosition="right" :aria-label="`混合参考${item.label}数量`" />
-              </label>
-            </div>
+            <el-text v-if="draft.type === 'video' && draft.modes.includes('multiReference')" class="fieldHint" type="info" size="small">
+              混合参考数量（自动统计）：图片 ×{{ referenceCounts.image }}、视频 ×{{ referenceCounts.video }}、音频 ×{{ referenceCounts.audio }}。
+            </el-text>
             <el-text v-for="warning in modeWarnings" :key="warning" class="fieldHint" type="warning" size="small">{{ warning }}</el-text>
           </div>
         </el-form-item>
@@ -66,7 +63,7 @@
                 @click="draft.durationResolutionMap.splice(index, 1)" />
             </div>
             <el-button class="addMapping" :icon="IconPlus" @click="draft.durationResolutionMap.push({ duration: [], resolution: [] })">添加时长与分辨率</el-button>
-            <el-text class="fieldHint" type="info" size="small">配置后视频卡片才会显示时长和分辨率选项；留空则保持工作流默认值。</el-text>
+            <el-text class="fieldHint" type="info" size="small">配置后视频卡片才会显示时长和分辨率选项；未配置时，绑定的前端时长/分辨率会向工作流写入 None，如需保留工作流默认值请把对应行设为「原始数据」。</el-text>
           </div>
         </el-form-item>
       </el-form>
@@ -148,7 +145,7 @@
             <el-text v-for="warning in ratioWarnings" :key="warning" class="fieldHint" type="warning" size="small">{{ warning }}</el-text>
           </template>
           <template v-if="draft.type === 'video' && group.source === 'ratio'">
-            <el-text class="fieldHint" type="info" size="small">绑定分辨率选择节点（如 ResolutionSelector）的比例字段，字段选项会作为视频卡片的比例选项。</el-text>
+            <el-text class="fieldHint" type="info" size="small">绑定分辨率选择节点（如 ResolutionSelector）的比例字段，字段选项会作为视频卡片的比例选项；把同一节点的 megapixels 设为「前端设置」后，视频卡片所选分辨率会按 720p→0.92、1K→1、1280x720→0.92 这类写法换算成总像素写入。</el-text>
             <el-text v-if="derivedRatios.length" class="fieldHint" type="info" size="small">
               视频卡片比例选项：{{ derivedRatios.join('、') }}
             </el-text>
@@ -347,12 +344,6 @@ const modeOptions: Record<MediaType, ModeOption[]> = {
   audio: [],
 };
 const modeLabels: Record<MediaType, string> = { image: "图片生成模式", video: "视频生成模式", audio: "生成模式" };
-const mixedReferenceOptions = [
-  { key: "image", label: "图片" },
-  { key: "video", label: "视频" },
-  { key: "audio", label: "音频" },
-] as const;
-const defaultMixedCounts: MixedCounts = { image: 9, video: 3, audio: 3 };
 // 编译与展示顺序固定；组内顺序仍由用户上下移动决定。
 const inputSourceOrder: ParamSource[] = ["prompt", "image", "video", "audio", "duration", "size", "ratio"];
 const sourceLabels: Record<InputSource, string> = {
@@ -405,7 +396,8 @@ function rowGroupForSource(source: BindingSource): ParamSource {
 }
 
 function bindingSourceFor(source: ParamSource, fieldName: string): BindingSource {
-  return draft.value.type === "image" && source === "ratio" && fieldName === "megapixels" ? "megapixels" : source;
+  // ACT: 图片与视频的 megapixels 都保存在「分辨率」分组，但绑定来源仍是 megapixels。
+  return source === "ratio" && fieldName === "megapixels" ? "megapixels" : source;
 }
 
 function emptyRows(): Record<ParamSource, InputRow[]> {
@@ -429,7 +421,6 @@ function createDraft() {
     durationResolutionMap: [] as { duration: string[]; resolution: string[] }[],
     imageSizes: [] as string[],
     modes: [] as string[],
-    mixedReferenceCounts: { ...defaultMixedCounts },
     extraModes: [] as ModeEntry[],
     removedSources: [] as string[],
   };
@@ -440,33 +431,24 @@ function rowKey() {
   return `row-${++rowSeq}`;
 }
 
-function parseMixedCounts(entry: string[]): MixedCounts | undefined {
-  const counts: MixedCounts = { image: 0, video: 0, audio: 0 };
-  let found = false;
-  for (const item of entry) {
+// ACT: 旧配置里视频的混合参考数组仍用于恢复「混合参考」模式；参考数量改为按输入节点自动统计。
+function isReferenceCounts(entry: string[]) {
+  return entry.length > 0 && entry.every(item => {
     const match = /^(image|video|audio)Reference:(\d+)$/.exec(item);
-    if (!match) return undefined;
-    const count = Number(match[2]);
-    if (!Number.isSafeInteger(count) || count < 1 || count > 256) return undefined;
-    counts[match[1] as keyof MixedCounts] = count;
-    found = true;
-  }
-  return found ? counts : undefined;
+    return Boolean(match && Number(match[2]) >= 1 && Number(match[2]) <= 256);
+  });
 }
 
-// ACT: 图片、视频、音频共用：已知模式进 selected，视频的混合参考数组解析成数量，其余原样保留。
+// ACT: 图片、视频、音频共用：已知模式进 selected，视频的混合参考数组还原成 multiReference，其余原样保留。
 function parseModes(type: MediaType, raw: unknown) {
   const known = new Set(modeOptions[type].map(option => option.value));
   const selected: string[] = [];
   const extra: ModeEntry[] = [];
-  let mixed = { ...defaultMixedCounts };
   for (const item of Array.isArray(raw) ? raw : []) {
     if (Array.isArray(item)) {
       if (!item.every(entry => typeof entry === "string")) continue;
-      const counts = type === "video" && !selected.includes("multiReference") ? parseMixedCounts(item) : undefined;
-      if (counts) {
-        mixed = counts;
-        selected.push("multiReference");
+      if (type === "video" && isReferenceCounts(item)) {
+        if (!selected.includes("multiReference")) selected.push("multiReference");
       } else extra.push(item);
       continue;
     }
@@ -474,17 +456,17 @@ function parseModes(type: MediaType, raw: unknown) {
     if (!known.has(item)) extra.push(item);
     else if (!selected.includes(item)) selected.push(item);
   }
-  return { selected, mixed, extra };
+  return { selected, extra };
 }
 
-function serializeModes(type: MediaType, selected: string[], mixed: MixedCounts, extra: ModeEntry[]) {
+function serializeModes(type: MediaType, selected: string[], extra: ModeEntry[]) {
   const result: ModeEntry[] = [];
   for (const option of modeOptions[type]) {
     if (!selected.includes(option.value)) continue;
     if (option.value === "multiReference" && type === "video") {
-      const references = mixedReferenceOptions
-        .filter(item => mixed[item.key] >= 1)
-        .map(item => `${item.key}Reference:${Math.min(Math.floor(mixed[item.key]), 256)}`);
+      const references = (["image", "video", "audio"] as const)
+        .filter(key => referenceCounts.value[key] >= 1)
+        .map(key => `${key}Reference:${Math.min(referenceCounts.value[key], 256)}`);
       if (references.length) result.push(references);
     } else result.push(option.value);
   }
@@ -577,7 +559,6 @@ function applyModel() {
     })) : [];
     const parsedModes = parseModes(mediaType, mode);
     next.modes = parsedModes.selected;
-    next.mixedReferenceCounts = parsedModes.mixed;
     next.extraModes = parsedModes.extra;
     next.removedSources = collectUnsupportedSources(bindings);
     const parsed = Array.isArray(bindings) ? bindings.map(normalizeBinding).filter((item): item is Binding => Boolean(item)) : [];
@@ -688,7 +669,7 @@ async function syncNodes() {
     for (const source of inputSourceOrder) {
       for (const nodeId of new Set(draft.value.rowsBySource[source].map(row => row.nodeId))) addMissingNodeFields(source, nodeId);
     }
-    ensureImageBindings();
+    ensureSelectorBindings();
     syncError.value = nodes.value.length ? "" : "工作流中没有可用节点";
   } catch (error) {
     syncError.value = axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : "同步节点失败，请重试";
@@ -739,6 +720,13 @@ function enabledRows(source: ParamSource) {
   return draft.value.rowsBySource[source].filter(row => row.mode === "frontend").length;
 }
 
+// ACT: 参考数量不再手动填写，按「参考图/参考视频/参考音频」分组中启用中的节点行自动统计。
+const referenceCounts = computed<MixedCounts>(() => ({
+  image: enabledRows("image"),
+  video: enabledRows("video"),
+  audio: enabledRows("audio"),
+}));
+
 // ACT: 仅提示缺失的输入节点，不阻止保存，便于先声明模式再补绑定。
 const videoModeImageRequirements = [
   { mode: "singleImage", minImages: 1, message: "已勾选「单图参考」，但没有启用中的参考图节点，生成时图片不会传入。" },
@@ -760,7 +748,6 @@ function buildModeWarnings() {
   }
   if (selected.includes("multiReference")) {
     if (!enabledRows("image") && !enabledRows("video") && !enabledRows("audio")) warnings.push("已勾选「混合参考」，但没有启用中的参考图、参考视频或参考音频节点。");
-    if (!mixedReferenceOptions.some(item => draft.value.mixedReferenceCounts[item.key] >= 1)) warnings.push("混合参考的参考数量至少需要一项大于 0。");
   }
   return warnings;
 }
@@ -979,13 +966,24 @@ function ensureFieldRow(source: ParamSource, fieldName: string) {
 }
 
 // ACT: 图片模型只要工作流里放入了 ResolutionSelector，就在「分辨率」分组自动绑定 aspect_ratio；配置了分辨率时再补 megapixels。
-function ensureImageBindings() {
-  if (draft.value.type !== "image") return;
-  migrateImageRows();
-  if (!draft.value.rowsBySource.ratio.some(row => row.mode === "frontend" && row.fieldName === "aspect_ratio")) {
-    ensureRow("ratio", row => ratioOptionsOfField(row.nodeId, row.fieldName).length > 0);
+// ACT: 视频模型配置了分辨率选项时，自动把 ResolutionSelector.megapixels 绑定为前端设置，生成时按卡片分辨率换算。
+function ensureSelectorBindings() {
+  if (draft.value.type === "image") {
+    migrateImageRows();
+    // ACT: 只补缺失的绑定，不覆盖用户显式设置的固定值/原始数据。
+    if (!draft.value.rowsBySource.ratio.some(row => row.fieldName === "aspect_ratio")) {
+      ensureRow("ratio", row => ratioOptionsOfField(row.nodeId, row.fieldName).length > 0);
+    }
+    if (draft.value.imageSizes.length && !draft.value.rowsBySource.ratio.some(row => row.fieldName === "megapixels")) {
+      ensureFieldRow("ratio", "megapixels");
+    }
   }
-  if (draft.value.imageSizes.length) ensureFieldRow("ratio", "megapixels");
+  if (draft.value.type === "video") {
+    const hasResolutions = draft.value.durationResolutionMap.some(row => row.resolution.some(item => item.trim()));
+    if (hasResolutions && !draft.value.rowsBySource.ratio.some(row => row.fieldName === "megapixels")) {
+      ensureFieldRow("ratio", "megapixels");
+    }
+  }
   dropDuplicateRows();
 }
 
@@ -1095,6 +1093,8 @@ function fieldValueType(row: InputRow) {
 
 function canUseFrontend(source: ParamSource, row: InputRow) {
   const input = fieldsOf(row.nodeId).find(item => item.name === row.fieldName);
+  // ACT: megapixels 是数字型总像素数；图片由分辨率选项换算，视频由卡片所选分辨率换算，两种模型都允许前端设置。
+  if (row.fieldName === "megapixels") return !input || input.valueType === "number";
   const policy = policyFor(source);
   if (policy) {
     // ACT: 只有 aspect_ratio / megapixels 允许前端设置；未同步时按字段名判断，保证同步失败也能保存。
@@ -1267,7 +1267,7 @@ const capabilityKeys = ["mode", "imageSizes", "imageRatios", "videoRatios", "dur
 function applyCapabilities(value: MediaProviderModel) {
   for (const key of capabilityKeys) Reflect.deleteProperty(value, key);
   if (draft.value.type !== "video") Reflect.deleteProperty(value, "audio");
-  const modes = serializeModes(draft.value.type, draft.value.modes, draft.value.mixedReferenceCounts, draft.value.extraModes);
+  const modes = serializeModes(draft.value.type, draft.value.modes, draft.value.extraModes);
   if (modes.length) value.mode = modes;
   if (draft.value.type === "image") {
     const sizes = [...new Set(draft.value.imageSizes.map(item => item.trim()).filter(Boolean))];
@@ -1282,13 +1282,21 @@ function applyCapabilities(value: MediaProviderModel) {
     return;
   }
   if (draft.value.type === "video") {
+    // ACT: 前端比例必须有可选值，否则节点不会提交比例，运行时会向工作流写入 None。
+    if (draft.value.rowsBySource.ratio.some(row => row.mode === "frontend" && row.fieldName !== "megapixels") && !derivedRatios.value.length) {
+      throw new Error("请在「分辨率」分组绑定 ResolutionSelector 的 aspect_ratio 参数");
+    }
     const rows = draft.value.durationResolutionMap.filter(row => row.duration.length || row.resolution.length);
+    // ACT: megapixels 前端设置时，卡片分辨率会换算成总像素写入节点，必须能换算且在节点范围内。
+    const megapixelsFrontend = draft.value.rowsBySource.ratio.some(row => row.mode === "frontend" && row.fieldName === "megapixels");
+    if (megapixelsFrontend && !rows.some(row => row.resolution.length)) throw new Error("megapixels 使用前端设置时，请先填写视频分辨率选项");
     if (rows.length) {
       value.durationResolutionMap = rows.map((row, index) => {
         const duration = row.duration.map(Number);
         const resolution = row.resolution.map(item => item.trim());
         if (!duration.length || duration.some(item => !Number.isFinite(item) || item <= 0)) throw new Error(`第 ${index + 1} 组时长必须是正数`);
         if (!resolution.length || resolution.some(item => !item)) throw new Error(`请填写第 ${index + 1} 组分辨率`);
+        if (resolution.some(item => !isValidMegapixels(item))) throw new Error(`第 ${index + 1} 组分辨率须能换算为 0.1–16 之间的 megapixels，请使用 720p、1K 或 1280x720 这类写法`);
         return { duration, resolution };
       });
     }
@@ -1302,6 +1310,9 @@ function sizeMegapixels(value: string) {
   if (k) return Number(k[1]);
   const px = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(value);
   if (px) return Number((Number(px[1]) * Number(px[2]) / 1e6).toFixed(2));
+  // ACT: 视频分辨率常按短边高度标注（如 720p、1080p），按 16:9 估算总像素。
+  const p = /^(\d+)\s*p$/i.exec(value);
+  if (p) return Number((Number(p[1]) ** 2 * 16 / 9 / 1e6).toFixed(2));
   return undefined;
 }
 
@@ -1323,7 +1334,7 @@ function confirmModel() {
     if (!/^[A-Za-z0-9_-]+$/.test(workflowId)) throw new Error("工作流 ID 只能包含字母、数字、下划线和短横线");
     if (id.length > 200) throw new Error("模型 ID 不能超过 200 个字符");
     if (props.models.some(item => item !== props.model && String(item.id).trim() === id)) throw new Error(`模型 ID 已存在：${id}`);
-    ensureImageBindings();
+    ensureSelectorBindings();
 
     const bindings: Binding[] = [];
     const seen = new Set<string>();
@@ -1441,23 +1452,6 @@ function confirmModel() {
       display: flex;
       flex-wrap: wrap;
       gap: 4px 16px;
-    }
-
-    .mixedCounts {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 16px;
-      margin-top: 10px;
-
-      label {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        color: var(--el-text-color-secondary);
-        font-size: 12px;
-      }
-
-      .el-input-number { width: 96px; }
     }
   }
 

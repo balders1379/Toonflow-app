@@ -101,6 +101,26 @@ const modeLabels: Record<string, string> = {
   imageReference: "图片参考", videoReference: "视频参考", audioReference: "音频参考",
 };
 
+// ACT: RunningHub 模型的参考数量不再手写，按输入绑定中启用中的参考节点统计；图片模型也按同一逻辑显示。
+function bindingReferenceTags(model: MediaProviderModel) {
+  if (!Array.isArray(model.bindings)) return [];
+  const counts = { image: 0, video: 0, audio: 0 };
+  for (const binding of model.bindings) {
+    if (!binding || typeof binding !== "object" || Array.isArray(binding)) continue;
+    const raw = binding as Record<string, unknown>;
+    if (raw.role === "output") continue;
+    const fields = Array.isArray(raw.fields) ? raw.fields : [raw];
+    for (const field of fields) {
+      if (!field || typeof field !== "object" || Array.isArray(field)) continue;
+      const source = (field as Record<string, unknown>).source;
+      if (source === "image" || source === "video" || source === "audio") counts[source] += 1;
+    }
+  }
+  return (["image", "video", "audio"] as const)
+    .filter(key => counts[key] > 0)
+    .map(key => `${modeLabels[`${key}Reference`]} ×${counts[key]}`);
+}
+
 watch(visible, isVisible => {
   if (!isVisible) return;
   formError.value = "";
@@ -115,11 +135,14 @@ watch(visible, isVisible => {
 
 function modelTags(model: MediaProviderModel) {
   const modes = Array.isArray(model.mode) ? model.mode.flat().filter((mode): mode is string => typeof mode === "string") : [];
-  return modes.map(mode => {
+  const tags = modes.map(mode => {
     if (mode === "text") return model.type === "image" ? translate("文生图") : translate("文生视频");
     const reference = /^(imageReference|videoReference|audioReference):(\d+)$/.exec(mode);
     return reference ? `${modeLabels[reference[1]!]} ×${reference[2]}` : modeLabels[mode] ?? mode;
   });
+  // ACT: 有节点绑定（RunningHub）时以输入绑定的自动统计为准，避免与 mode 中的旧数量重复。
+  if (!Array.isArray(model.bindings)) return tags;
+  return [...tags.filter(tag => !/^(图片参考|视频参考|音频参考) ×\d+$/.test(tag)), ...bindingReferenceTags(model)];
 }
 
 function editModel(index?: number) {
