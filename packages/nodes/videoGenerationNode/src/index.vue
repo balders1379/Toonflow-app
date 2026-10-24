@@ -162,7 +162,7 @@ function ratioPrefix(value: string) {
 
 function getRatioOptions(choice?: NodeMediaModel) {
   const configured = choice?.videoRatios?.filter(item => typeof item === "string" && item.trim());
-  return configured?.length ? configured : defaultRatioOptions;
+  return configured ?? defaultRatioOptions;
 }
 
 const ratioOptions = computed(() => getRatioOptions(selectedModel.value));
@@ -176,8 +176,8 @@ function resolveRatio(choice: NodeMediaModel | undefined, value: string) {
 
 function fallbackRatio(choice: NodeMediaModel | undefined) {
   const options = getRatioOptions(choice);
-  if (choice?.videoRatios?.length) return options[0] ?? "9:16";
-  return options.includes("9:16") ? "9:16" : options[0] ?? "9:16";
+  if (choice?.videoRatios) return options[0] ?? "";
+  return options.includes("9:16") ? "9:16" : options[0] ?? "";
 }
 const selectedMode = computed(() => selectedModel.value?.mode?.find((item) => JSON.stringify(item) === data.value.mode) as NodeVideoRequest["mode"]);
 const frameMode = computed(() => ["startEndRequired", "endFrameOptional", "startFrameOptional"].includes(String(selectedMode.value)));
@@ -250,7 +250,7 @@ const generationInput = computed<Omit<NodeVideoRequest, "directory"> | undefined
     mode: selectedMode.value,
     duration: data.value.duration,
     resolution: data.value.resolution || undefined,
-    ratio: data.value.ratio,
+    ratio: data.value.ratio || undefined,
     generateAudio: choice.audio === "optional" ? data.value.generateAudio : choice.audio,
     outputDirectory: `assets/${id}`,
     images: frameMode.value ? undefined : images,

@@ -75,39 +75,48 @@
         <div v-for="group in presetGroups" :key="group.source" class="paramGroup">
           <div class="paramHeader">
             <span class="paramName">{{ group.label }}</span>
-            <el-button text size="small" :icon="IconPlus" :disabled="!hasAvailableField" @click="addRow(group.source)">添加节点</el-button>
+            <div class="addNodeControls">
+              <el-select v-model="nodeTypeFilters[group.source]" class="nodeTypeSelect" :aria-label="`${group.label}节点类型`">
+                <el-option value="" label="所有" />
+                <el-option v-for="nodeType in nodeTypes" :key="nodeType" :value="nodeType" :label="nodeType" />
+              </el-select>
+              <el-button text size="small" :icon="IconPlus" :disabled="!firstAvailablePair(group.source, nodeTypeFilters[group.source])" @click="addRow(group.source)">添加节点</el-button>
+            </div>
           </div>
           <div v-if="draft.rowsBySource[group.source].length" class="paramRows">
-            <div
-              v-for="(row, index) in draft.rowsBySource[group.source]"
-              :key="row.key"
-              class="paramRow"
-              :class="{ rowDisabled: row.disabled }">
-              <el-select v-model="row.nodeId" class="nodeSelect" filterable aria-label="节点" @change="onNodeChange(group.source, row)">
-                <el-option v-for="node in nodeOptions" :key="node.nodeId" :value="node.nodeId" :label="`#${node.nodeId} · ${node.title}`">
-                  <span>#{{ node.nodeId }} · {{ node.title }}</span>
-                  <el-text v-if="node.classType && node.classType !== node.title" type="info" size="small">{{ node.classType }}</el-text>
-                </el-option>
-              </el-select>
-              <template v-if="fieldsOf(row.nodeId).length">
-                <el-select v-model="row.fieldName" class="fieldSelect" filterable aria-label="字段">
-                  <el-option v-for="choice in fieldChoices(row)" :key="choice.name" :value="choice.name" :label="fieldLabel(choice)">
-                    <span>{{ fieldLabel(choice) }}</span>
+            <div v-for="nodeGroup in groupedRows(group.source)" :key="nodeGroup.key" class="paramNode">
+              <div v-for="(row, rowIndex) in nodeGroup.rows" :key="row.key" class="paramRow">
+                <el-select v-if="rowIndex === 0" v-model="row.nodeId" class="nodeSelect" aria-label="节点" @change="onNodeGroupChange(group.source, nodeGroup.rows)">
+                  <el-option v-for="node in nodeOptions" :key="node.nodeId" :value="node.nodeId" :label="nodeOptionLabel(node)">
+                    <span>#{{ node.nodeId }} · {{ node.title }}</span>
+                    <el-text v-if="node.classType" type="info" size="small"> · {{ node.classType }}</el-text>
                   </el-option>
                 </el-select>
-              </template>
-              <el-input v-else v-model="row.fieldName" class="fieldSelect" placeholder="输入工作流中的参数名" aria-label="参数名" />
-              <el-switch v-model="row.disabled" active-text="None" inactive-text="使用" :aria-label="`${group.label}第 ${index + 1} 行是否使用`" />
-              <div class="rowActions">
-                <el-button text size="small" :icon="IconArrowUp" :disabled="index === 0" aria-label="上移" @click="moveRow(group.source, index, -1)" />
-                <el-button text size="small" :icon="IconArrowDown" :disabled="index === draft.rowsBySource[group.source].length - 1" aria-label="下移" @click="moveRow(group.source, index, 1)" />
-                <el-button text size="small" type="danger" :icon="IconTrash" aria-label="删除节点" @click="removeRow(group.source, index)" />
-              </div>
-              <div class="rowMeta">
-                <el-text v-if="row.disabled" type="warning" size="small">生成时写入 None，不占用参考素材</el-text>
-                <el-text v-else-if="fieldDefault(row)" type="info" size="small">{{ fieldDefault(row) }}</el-text>
-                <el-text v-if="fieldMissing(row)" type="warning" size="small">参数未在同步结果中</el-text>
-                <el-text v-if="!fieldsOf(row.nodeId).length" type="info" size="small">该节点未同步，无法校验参数</el-text>
+                <span v-else class="nodeSpacer" aria-hidden="true" />
+                <template v-if="fieldsOf(row.nodeId).length">
+                  <el-select :model-value="row.fieldName" class="fieldSelect" aria-label="字段" @update:model-value="value => onFieldSelect(group.source, row, value)">
+                    <el-option v-for="choice in fieldChoices(group.source, row)" :key="choice.name" :value="choice.name" :label="fieldLabel(choice)">
+                      <span>{{ fieldLabel(choice) }}</span>
+                    </el-option>
+                  </el-select>
+                </template>
+                <el-input v-else v-model="row.fieldName" class="fieldSelect" placeholder="输入工作流中的参数名" aria-label="参数名" @change="onFieldChange(group.source, row)" />
+                <el-select v-model="row.mode" class="modeSelect" :aria-label="`${row.fieldName} 数值来源`" @change="onModeChange(row)">
+                  <el-option value="frontend" label="前端设置" :disabled="!canUseFrontend(group.source, row)" />
+                  <el-option value="fixed" label="固定数值" />
+                  <el-option value="original" label="原始数据" :disabled="workflowValue(row.nodeId, row.fieldName) === undefined" />
+                </el-select>
+                <div v-if="row.mode !== 'frontend'" class="fixedValue">
+                  <el-switch v-if="fieldValueType(row) === 'boolean' && row.fixedValue !== 'None'" :model-value="(row.mode === 'original' ? workflowValue(row.nodeId, row.fieldName) : row.fixedValue) as boolean" :disabled="row.mode === 'original'" :aria-label="`${row.fieldName} 固定值`" @update:model-value="value => row.fixedValue = value" />
+                  <el-input v-else :model-value="String(row.mode === 'original' ? workflowValue(row.nodeId, row.fieldName) ?? '' : row.fixedValue ?? '')" :disabled="row.mode === 'original'" :aria-label="`${row.fieldName} 固定值`" @update:model-value="value => setRowFixedValue(row, value)" />
+                </div>
+                <div v-if="rowIndex === 0" class="rowActions">
+                  <el-button text size="small" type="danger" :icon="IconTrash" aria-label="删除节点" @click="removeNodeGroup(group.source, nodeGroup.rows)" />
+                </div>
+                <div v-if="fieldMissing(row) || !fieldsOf(row.nodeId).length" class="rowMeta">
+                  <el-text v-if="fieldMissing(row)" type="warning" size="small">参数未在同步结果中</el-text>
+                  <el-text v-if="!fieldsOf(row.nodeId).length" type="info" size="small">该节点未同步，无法校验参数</el-text>
+                </div>
               </div>
             </div>
           </div>
@@ -125,56 +134,53 @@
       <div class="paramSection">
         <div class="sectionHeader">
           <h4>默认参数</h4>
-          <el-button text size="small" :icon="IconPlus" :disabled="!canAddDefaultNode" @click="addDefaultNode">添加节点</el-button>
+          <div class="addNodeControls">
+            <el-select v-model="nodeTypeFilters.default" class="nodeTypeSelect" aria-label="默认参数节点类型">
+              <el-option value="" label="所有" />
+              <el-option v-for="nodeType in nodeTypes" :key="nodeType" :value="nodeType" :label="nodeType" />
+            </el-select>
+            <el-button text size="small" :icon="IconPlus" :disabled="!canAddDefaultNode" @click="addDefaultNode">添加节点</el-button>
+          </div>
         </div>
-        <div v-if="draft.defaultNodes.length" class="defaultNodes">
-          <div v-for="(node, index) in draft.defaultNodes" :key="node.key" class="defaultNode">
-            <div class="defaultNodeHeader">
-              <el-select v-model="node.nodeId" filterable aria-label="默认参数节点" @change="onDefaultNodeChange(node)">
-                <el-option v-for="item in defaultNodeChoices(node)" :key="item.nodeId" :value="item.nodeId" :label="`#${item.nodeId} · ${item.title}`">
+        <div v-if="draft.defaultNodes.length" class="paramRows">
+          <div v-for="(node, index) in draft.defaultNodes" :key="node.key" class="paramNode">
+            <div v-for="(field, fieldIndex) in defaultFields(node).length ? defaultFields(node) : [null]" :key="field?.name ?? node.key" class="paramRow defaultParamRow">
+              <el-select v-if="fieldIndex === 0" v-model="node.nodeId" class="nodeSelect" aria-label="默认参数节点" @change="onDefaultNodeChange(node)">
+                <el-option v-for="item in defaultNodeChoices(node)" :key="item.nodeId" :value="item.nodeId" :label="nodeOptionLabel(item)">
                   <span>#{{ item.nodeId }} · {{ item.title }}</span>
-                  <el-text v-if="item.classType && item.classType !== item.title" type="info" size="small">{{ item.classType }}</el-text>
+                  <el-text v-if="item.classType" type="info" size="small"> · {{ item.classType }}</el-text>
                 </el-option>
               </el-select>
-              <el-button text size="small" type="danger" :icon="IconTrash" :aria-label="`删除默认参数节点 ${index + 1}`" @click="removeDefaultNode(index)" />
-            </div>
-            <div v-if="defaultFields(node).length" class="defaultFields">
-              <div v-for="field in defaultFields(node)" :key="field.name" class="defaultField" :class="{ fieldDisabled: field.used }">
-                <span class="defaultFieldName" :title="field.name">{{ field.name }}</span>
-                <el-switch
-                  v-if="field.valueType === 'boolean'"
-                  :model-value="node.values[field.name] as boolean"
-                  :disabled="field.used"
-                  :aria-label="`${field.name} 默认值`"
-                  @update:model-value="value => setDefaultValue(node, field.name, value)" />
-                <el-input-number
-                  v-else-if="field.valueType === 'number'"
-                  :model-value="node.values[field.name] as number"
-                  :disabled="field.used"
-                  controlsPosition="right"
-                  size="small"
-                  :aria-label="`${field.name} 默认值`"
-                  @update:model-value="value => setDefaultValue(node, field.name, value)" />
-                <el-select
-                  v-else-if="defaultFieldOptions(node, field)"
-                  :model-value="node.values[field.name] as string"
-                  :disabled="field.used"
-                  size="small"
-                  :aria-label="`${field.name} 默认值`"
-                  @update:model-value="value => setDefaultValue(node, field.name, value)">
-                  <el-option v-for="option in (defaultFieldOptions(node, field) ?? [])" :key="option" :value="option" :label="option" />
+              <span v-else class="nodeSpacer" aria-hidden="true" />
+              <template v-if="field">
+                <el-select :model-value="field.name" class="fieldSelect" :aria-label="`默认参数 ${field.name}`" @update:model-value="value => onDefaultFieldSelect(node, field.name, value)">
+                  <el-option v-for="choice in defaultFields(node)" :key="choice.name" :value="choice.name" :label="`${choice.name}（${valueTypeLabels[choice.valueType]}）`" />
                 </el-select>
-                <el-input
-                  v-else
-                  :model-value="node.values[field.name] as string"
-                  :disabled="field.used"
-                  size="small"
-                  :aria-label="`${field.name} 默认值`"
-                  @update:model-value="value => setDefaultValue(node, field.name, value)" />
-                <el-text v-if="field.used" type="warning" size="small">已由输入参数控制</el-text>
+                <el-select v-if="!field.used" :model-value="defaultFieldMode(node, field.name)" class="modeSelect" :aria-label="`${field.name} 数值来源`" @update:model-value="value => onDefaultModeChange(node, field.name, value)">
+                  <el-option value="fixed" label="固定数值" />
+                  <el-option value="original" label="原始数据" :disabled="workflowValue(node.nodeId, field.name) === undefined" />
+                </el-select>
+                <div v-if="!field.used" class="defaultValue">
+                  <el-switch
+                    v-if="field.valueType === 'boolean'"
+                    :model-value="defaultFieldValue(node, field.name) as boolean"
+                    :disabled="defaultFieldMode(node, field.name) === 'original'"
+                    :aria-label="`${field.name} 默认值`"
+                    @update:model-value="value => setDefaultValue(node, field.name, value)" />
+                  <el-input
+                    v-else
+                    :model-value="String(defaultFieldValue(node, field.name) ?? '')"
+                    :disabled="defaultFieldMode(node, field.name) === 'original'"
+                    :aria-label="`${field.name} 默认值`"
+                    @update:model-value="value => setDefaultValue(node, field.name, value)" />
+                </div>
+                <el-text v-if="field.used" class="defaultUsed" type="warning" size="small">已由输入参数控制</el-text>
+              </template>
+              <el-text v-else class="rowMeta" type="info" size="small">该节点没有可设置的参数，或尚未同步节点信息。</el-text>
+              <div v-if="fieldIndex === 0" class="rowActions">
+                <el-button text size="small" type="danger" :icon="IconTrash" :aria-label="`删除默认参数节点 ${index + 1}`" @click="removeDefaultNode(node)" />
               </div>
             </div>
-            <el-text v-else class="fieldHint" type="info" size="small">该节点没有可设置的参数，或尚未同步节点信息。</el-text>
           </div>
         </div>
         <el-text v-else class="emptyGroup" type="info" size="small">未指定默认参数</el-text>
@@ -184,14 +190,20 @@
       <div class="paramSection">
         <div class="sectionHeader">
           <h4>{{ outputLabel }}</h4>
-          <el-button text size="small" :icon="IconPlus" :disabled="!canAddOutput" @click="addOutputRow">添加输出节点</el-button>
+          <div class="addNodeControls">
+            <el-select v-model="nodeTypeFilters.output" class="nodeTypeSelect" aria-label="输出节点类型">
+              <el-option value="" label="所有" />
+              <el-option v-for="nodeType in nodeTypes" :key="nodeType" :value="nodeType" :label="nodeType" />
+            </el-select>
+            <el-button text size="small" :icon="IconPlus" :disabled="!canAddOutput" @click="addOutputRow">添加输出节点</el-button>
+          </div>
         </div>
         <div v-if="draft.outputRows.length" class="paramRows">
           <div v-for="(row, index) in draft.outputRows" :key="row.key" class="paramRow outputRow">
-            <el-select v-model="row.nodeId" class="nodeSelect" filterable aria-label="输出节点">
-              <el-option v-for="node in outputNodeChoices(row)" :key="node.nodeId" :value="node.nodeId" :label="`#${node.nodeId} · ${node.title}`">
+            <el-select v-model="row.nodeId" class="nodeSelect" aria-label="输出节点">
+              <el-option v-for="node in outputNodeChoices(row)" :key="node.nodeId" :value="node.nodeId" :label="nodeOptionLabel(node)">
                 <span>#{{ node.nodeId }} · {{ node.title }}</span>
-                <el-text v-if="node.classType && node.classType !== node.title" type="info" size="small">{{ node.classType }}</el-text>
+                <el-text v-if="node.classType" type="info" size="small"> · {{ node.classType }}</el-text>
               </el-option>
             </el-select>
             <div class="rowActions">
@@ -211,18 +223,24 @@
           <div v-for="row in draft.rowsBySource[group.source]" :key="row.key" class="legacyRow">
             <span class="legacyNode">{{ nodeLabel(row.nodeId) }}</span>
             <span class="legacyField">{{ row.fieldName }}</span>
-            <el-text v-if="row.disabled" type="warning" size="small">写入 None</el-text>
+            <el-text v-if="row.mode === 'fixed'" type="info" size="small">固定值：{{ row.fixedValue }}</el-text>
           </div>
         </div>
         <el-text class="fieldHint" type="info" size="small">这些参数不属于当前模型类型的预设分组，会原样保存；切回对应类型后可继续编辑。</el-text>
       </div>
 
-      <el-alert v-if="syncError" :title="syncError" type="error" :closable="false" showIcon />
-      <el-alert v-if="formError" class="formError" :title="formError" type="error" :closable="false" showIcon />
     </div>
     <template #footer>
-      <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" @click="confirmModel">确定</el-button>
+      <div class="dialogFooter">
+        <div v-if="syncError || formError" class="footerErrors" role="alert">
+          <el-text v-if="syncError" type="danger" size="small">{{ syncError }}</el-text>
+          <el-text v-if="formError" type="danger" size="small">{{ formError }}</el-text>
+        </div>
+        <div class="footerActions">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button type="primary" @click="confirmModel">确定</el-button>
+        </div>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -241,10 +259,12 @@ type InputSource =
   | "audio"
   | "duration"
   | "ratio"
-  | "fixed";
-type ParamSource = Exclude<InputSource, "fixed">;
+  | "fixed"
+  | "original";
+type ParamSource = Exclude<InputSource, "fixed" | "original">;
+type NodeTypeScope = ParamSource | "default" | "output";
 type ValueType = "string" | "number" | "boolean";
-type BindingField = { fieldName: string; source: InputSource; value?: string | number | boolean; disabled?: boolean };
+type BindingField = { fieldName: string; source: InputSource; value?: string | number | boolean; disabled?: boolean; inputSource?: ParamSource };
 type InputBinding = { role: "input"; nodeId: string; fields: BindingField[] };
 type OutputBinding = { role: "output"; nodeId: string; mediaType: MediaType };
 type Binding = InputBinding | OutputBinding;
@@ -254,10 +274,10 @@ type WorkflowNode = {
   title: string;
   inputs: { name: string; valueType: ValueType; value?: string | number | boolean }[];
 };
-type InputRow = { key: string; nodeId: string; fieldName: string; disabled: boolean };
+type InputRow = { key: string; nodeId: string; fieldName: string; mode: "frontend" | "fixed" | "original"; fixedValue?: DefaultValue };
 type OutputRow = { key: string; nodeId: string };
 type DefaultValue = string | number | boolean;
-type DefaultNode = { key: string; nodeId: string; values: Record<string, DefaultValue> };
+type DefaultNode = { key: string; nodeId: string; values: Record<string, DefaultValue>; originalFields: string[]; fieldOrder?: string[] };
 type DefaultField = { name: string; valueType: ValueType; used: boolean };
 type ParamDef = { source: ParamSource; label: string };
 type FieldChoice = { name: string; valueType: ValueType; status: "ok" | "missing" | "duplicate" };
@@ -297,6 +317,7 @@ const sourceLabels: Record<InputSource, string> = {
   duration: "时长（秒）",
   ratio: "分辨率",
   fixed: "固定值",
+  original: "原始数据",
 };
 const presetDefs: Record<MediaType, ParamDef[]> = {
   image: [
@@ -331,10 +352,14 @@ const knownFieldOptions: Record<string, string[]> = {
 };
 const outputLabels: Record<MediaType, string> = { image: "输出图片", video: "输出视频", audio: "输出音频" };
 const valueTypeLabels: Record<ValueType, string> = { string: "文本", number: "数字", boolean: "布尔" };
-const allSources: InputSource[] = [...inputSourceOrder, "fixed"];
+const allSources: InputSource[] = [...inputSourceOrder, "fixed", "original"];
 
 function emptyRows(): Record<ParamSource, InputRow[]> {
   return Object.fromEntries(inputSourceOrder.map(source => [source, [] as InputRow[]])) as Record<ParamSource, InputRow[]>;
+}
+
+function emptyNodeTypeFilters(): Record<NodeTypeScope, string> {
+  return { prompt: "", image: "", video: "", audio: "", duration: "", ratio: "", default: "", output: "" };
 }
 
 function createDraft() {
@@ -361,6 +386,8 @@ function rowKey() {
 const draft = ref(createDraft());
 const originalType = ref<MediaType | "">("");
 const nodes = ref<WorkflowNode[]>([]);
+const nodeTypeFilters = ref(emptyNodeTypeFilters());
+const nodeTypes = computed(() => [...new Set(nodes.value.map(node => node.classType).filter(Boolean))]);
 const syncing = ref(false);
 const syncError = ref("");
 const formError = ref("");
@@ -387,6 +414,7 @@ function normalizeBinding(value: unknown): Binding | undefined {
     const result: BindingField = { fieldName: field.fieldName.trim(), source: field.source as InputSource };
     if (typeof field.value === "string" || typeof field.value === "number" || typeof field.value === "boolean") result.value = field.value;
     if (field.disabled === true) result.disabled = true;
+    if ((field.source === "fixed" || field.source === "original") && inputSourceOrder.some(source => source === field.inputSource)) result.inputSource = field.inputSource as ParamSource;
     return result;
   };
   // ACT: 兼容旧版每条绑定只有一个字段的结构。
@@ -396,6 +424,7 @@ function normalizeBinding(value: unknown): Binding | undefined {
 
 function applyModel() {
   nodes.value = [];
+  nodeTypeFilters.value = emptyNodeTypeFilters();
   syncing.value = false;
   syncError.value = "";
   formError.value = "";
@@ -433,6 +462,7 @@ function applyModel() {
     }
     const parsed = Array.isArray(bindings) ? bindings.map(normalizeBinding).filter((item): item is Binding => Boolean(item)) : [];
     const fixedValues = new Map<string, Record<string, DefaultValue>>();
+    const originalFields = new Map<string, string[]>();
     for (const binding of parsed) {
       if (binding.role === "output") {
         if (binding.mediaType === mediaType) {
@@ -443,6 +473,23 @@ function applyModel() {
         continue;
       }
       for (const field of binding.fields) {
+        if (field.source === "original") {
+          if (field.inputSource) {
+            next.rowsBySource[field.inputSource].push({ key: rowKey(), nodeId: binding.nodeId, fieldName: field.fieldName, mode: "original" });
+          } else {
+            const fields = originalFields.get(binding.nodeId) ?? [];
+            if (!fields.includes(field.fieldName)) fields.push(field.fieldName);
+            originalFields.set(binding.nodeId, fields);
+          }
+          continue;
+        }
+        if (field.source === "fixed" && field.inputSource) {
+          next.rowsBySource[field.inputSource].push({
+            key: rowKey(), nodeId: binding.nodeId, fieldName: field.fieldName,
+            mode: "fixed", fixedValue: field.disabled === true ? "None" : field.value,
+          });
+          continue;
+        }
         if (field.source === "fixed") {
           const value = field.disabled === true ? "None" : field.value;
           if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -456,12 +503,15 @@ function applyModel() {
           key: rowKey(),
           nodeId: binding.nodeId,
           fieldName: field.fieldName,
-          disabled: field.disabled === true,
+          mode: field.disabled === true ? "fixed" : "frontend",
+          fixedValue: field.disabled === true ? "None" : undefined,
         });
       }
     }
     savedDefaultValues = fixedValues;
-    next.defaultNodes = [...fixedValues.entries()].map(([nodeId, values]) => ({ key: rowKey(), nodeId, values: { ...values } }));
+    next.defaultNodes = [...new Set([...fixedValues.keys(), ...originalFields.keys()])].map(nodeId => ({
+      key: rowKey(), nodeId, values: { ...(fixedValues.get(nodeId) ?? {}) }, originalFields: originalFields.get(nodeId) ?? [],
+    }));
     draft.value = next;
     originalType.value = mediaType;
     idTouched.value = true;
@@ -511,7 +561,13 @@ async function syncNodes() {
     );
     if (data.code !== 200 || !data.data) throw new Error(data.message || "同步节点失败");
     nodes.value = Array.isArray(data.data.nodes) ? data.data.nodes : [];
+    for (const scope of Object.keys(nodeTypeFilters.value) as NodeTypeScope[]) {
+      if (!nodeTypes.value.includes(nodeTypeFilters.value[scope])) nodeTypeFilters.value[scope] = "";
+    }
     mergeDefaultNodeValues();
+    for (const source of inputSourceOrder) {
+      for (const nodeId of new Set(draft.value.rowsBySource[source].map(row => row.nodeId))) addMissingNodeFields(source, nodeId);
+    }
     syncError.value = nodes.value.length ? "" : "工作流中没有可用节点";
   } catch (error) {
     syncError.value = axios.isAxiosError(error) ? error.response?.data?.message || error.message : error instanceof Error ? error.message : "同步节点失败，请重试";
@@ -559,7 +615,7 @@ const outputLabel = computed(() => outputLabels[draft.value.type]);
 const typeChanged = computed(() => Boolean(props.model) && originalType.value !== "" && draft.value.type !== originalType.value);
 
 function enabledRows(source: ParamSource) {
-  return draft.value.rowsBySource[source].filter(row => !row.disabled).length;
+  return draft.value.rowsBySource[source].filter(row => row.mode === "frontend").length;
 }
 
 // ACT: 仅提示缺失的输入节点，不阻止保存，便于先声明模式再补绑定。
@@ -582,8 +638,17 @@ function nodeLabel(nodeId: string) {
   return node ? `#${nodeId} · ${node.title}` : `#${nodeId}`;
 }
 
+function nodeOptionLabel(node: WorkflowNode) {
+  const label = `#${node.nodeId} · ${node.title}`;
+  return node.classType ? `${label} · ${node.classType}` : label;
+}
+
 function fieldsOf(nodeId: string) {
   return nodeOptions.value.find(node => node.nodeId === nodeId)?.inputs ?? [];
+}
+
+function workflowValue(nodeId: string, fieldName: string) {
+  return fieldsOf(nodeId).find(input => input.name === fieldName)?.value;
 }
 
 function pairKey(nodeId: string, fieldName: string) {
@@ -637,15 +702,29 @@ function defaultFields(node: DefaultNode): DefaultField[] {
     if (fields.some(field => field.name === name)) continue;
     fields.push({ name, valueType: valueTypeOf(value), used: used.has(pairKey(node.nodeId, name)) });
   }
+  for (const name of node.originalFields) {
+    if (!fields.some(field => field.name === name)) fields.push({ name, valueType: "string", used: used.has(pairKey(node.nodeId, name)) });
+  }
+  if (node.fieldOrder) {
+    const positions = new Map(node.fieldOrder.map((name, index) => [name, index]));
+    fields.sort((first, second) => (positions.get(first.name) ?? fields.length) - (positions.get(second.name) ?? fields.length));
+  }
   return fields;
 }
 
-function defaultFieldOptions(node: DefaultNode, field: DefaultField) {
-  const classType = nodeOptions.value.find(item => item.nodeId === node.nodeId)?.classType ?? "";
-  const options = knownFieldOptions[`${classType}.${field.name}`];
-  if (!options) return undefined;
-  const current = node.values[field.name];
-  return typeof current === "string" && !options.includes(current) ? [current, ...options] : options;
+function defaultFieldMode(node: DefaultNode, fieldName: string) {
+  return node.originalFields.includes(fieldName) ? "original" : "fixed";
+}
+
+function defaultFieldValue(node: DefaultNode, fieldName: string) {
+  return defaultFieldMode(node, fieldName) === "original" ? workflowValue(node.nodeId, fieldName) : node.values[fieldName];
+}
+
+function onDefaultModeChange(node: DefaultNode, fieldName: string, mode: "fixed" | "original") {
+  node.originalFields = node.originalFields.filter(name => name !== fieldName);
+  if (mode === "original") node.originalFields.push(fieldName);
+  const value = workflowValue(node.nodeId, fieldName);
+  if (value !== undefined) node.values[fieldName] = value;
 }
 
 function ratioOptionsOfField(nodeId: string, fieldName: string) {
@@ -657,7 +736,7 @@ function ratioOptionsOfField(nodeId: string, fieldName: string) {
 const derivedVideoRatios = computed(() => {
   const result: string[] = [];
   for (const row of draft.value.rowsBySource.ratio) {
-    if (row.disabled) continue;
+    if (row.mode !== "frontend") continue;
     for (const option of ratioOptionsOfField(row.nodeId, row.fieldName)) {
       const value = option.trim();
       if (value && !result.includes(value)) result.push(value);
@@ -667,7 +746,7 @@ const derivedVideoRatios = computed(() => {
 });
 
 const ratioWarnings = computed(() => {
-  const rows = draft.value.rowsBySource.ratio.filter(row => !row.disabled);
+  const rows = draft.value.rowsBySource.ratio.filter(row => row.mode === "frontend");
   if (!rows.length) return [];
   const optionSets = rows.map(row => ratioOptionsOfField(row.nodeId, row.fieldName)).filter(options => options.length);
   const warnings: string[] = [];
@@ -680,34 +759,49 @@ const ratioWarnings = computed(() => {
   return warnings;
 });
 
-function defaultNodeChoices(row?: DefaultNode) {
-  return nodeOptions.value.filter(node => !draft.value.defaultNodes.some(item => item.key !== row?.key && item.nodeId === node.nodeId));
+function defaultNodeChoices(row?: DefaultNode, nodeType = "") {
+  return nodeOptions.value.filter(node => (!nodeType || node.classType === nodeType)
+    && !draft.value.defaultNodes.some(item => item.key !== row?.key && item.nodeId === node.nodeId));
 }
 
-const canAddDefaultNode = computed(() => defaultNodeChoices().length > 0);
+const canAddDefaultNode = computed(() => defaultNodeChoices(undefined, nodeTypeFilters.value.default).length > 0);
 
 function addDefaultNode() {
-  const node = defaultNodeChoices()[0];
+  const node = defaultNodeChoices(undefined, nodeTypeFilters.value.default)[0];
   if (!node) return;
-  draft.value.defaultNodes.push({ key: rowKey(), nodeId: node.nodeId, values: valuesForNode(node.nodeId) });
+  draft.value.defaultNodes.push({ key: rowKey(), nodeId: node.nodeId, values: valuesForNode(node.nodeId), originalFields: [] });
 }
 
 function onDefaultNodeChange(node: DefaultNode) {
   node.values = valuesForNode(node.nodeId);
+  node.originalFields = [];
+  node.fieldOrder = undefined;
 }
 
-function removeDefaultNode(index: number) {
-  draft.value.defaultNodes.splice(index, 1);
+function onDefaultFieldSelect(node: DefaultNode, fieldName: string, selectedName: string) {
+  if (fieldName === selectedName) return;
+  const order = defaultFields(node).map(field => field.name);
+  const first = order.indexOf(fieldName);
+  const second = order.indexOf(selectedName);
+  if (first < 0 || second < 0) return;
+  [order[first], order[second]] = [order[second]!, order[first]!];
+  node.fieldOrder = order;
+}
+
+function removeDefaultNode(node: DefaultNode) {
+  const index = draft.value.defaultNodes.findIndex(item => item.key === node.key);
+  if (index >= 0) draft.value.defaultNodes.splice(index, 1);
 }
 
 function preferredType(source: ParamSource): ValueType {
   return source === "duration" ? "number" : "string";
 }
 
-function firstAvailablePair(source: ParamSource) {
+function firstAvailablePair(source: ParamSource, nodeType = "") {
   const used = usedPairs();
   const candidates: { node: WorkflowNode; field: WorkflowNode["inputs"][number] }[] = [];
   for (const node of nodeOptions.value) {
+    if (nodeType && node.classType !== nodeType) continue;
     for (const field of node.inputs) {
       if (!used.has(pairKey(node.nodeId, field.name))) candidates.push({ node, field });
     }
@@ -719,16 +813,12 @@ function firstAvailablePair(source: ParamSource) {
   return candidates.find(item => item.field.valueType === preferredType(source)) ?? candidates[0];
 }
 
-const hasAvailableField = computed(() => {
-  const used = usedPairs();
-  return nodeOptions.value.some(node => node.inputs.some(input => !used.has(pairKey(node.nodeId, input.name))));
-});
-
-function fieldChoices(row: InputRow): FieldChoice[] {
+function fieldChoices(source: ParamSource, row: InputRow): FieldChoice[] {
   const inputs = fieldsOf(row.nodeId);
   const used = usedPairs(row);
+  const groupFields = new Set(draft.value.rowsBySource[source].filter(item => item.nodeId === row.nodeId).map(item => item.fieldName));
   const choices: FieldChoice[] = inputs
-    .filter(input => !used.has(pairKey(row.nodeId, input.name)))
+    .filter(input => !used.has(pairKey(row.nodeId, input.name)) || groupFields.has(input.name))
     .map(input => ({ name: input.name, valueType: input.valueType, status: "ok" }));
   const current = row.fieldName.trim();
   if (current && !choices.some(choice => choice.name === current)) {
@@ -749,59 +839,131 @@ function fieldMissing(row: InputRow) {
   return Boolean(inputs.length && row.fieldName && !inputs.some(input => input.name === row.fieldName));
 }
 
-function shortText(value: string | number | boolean) {
-  const text = String(value).replace(/\s+/g, " ").trim();
-  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+function fieldValueType(row: InputRow) {
+  return fieldsOf(row.nodeId).find(item => item.name === row.fieldName)?.valueType ?? "string";
 }
 
-function fieldDefault(row: InputRow) {
+function canUseFrontend(source: ParamSource, row: InputRow) {
   const input = fieldsOf(row.nodeId).find(item => item.name === row.fieldName);
-  if (!input) return "";
-  const type = valueTypeLabels[input.valueType];
-  return input.value === undefined ? type : `${type} · 当前值：${shortText(input.value)}`;
+  return !input || input.valueType === (source === "duration" ? "number" : "string");
+}
+
+function onFieldChange(source: ParamSource, row: InputRow) {
+  if (row.mode === "frontend" && !canUseFrontend(source, row)) row.mode = "fixed";
+  if (row.mode !== "frontend") row.fixedValue = workflowValue(row.nodeId, row.fieldName);
+}
+
+function onFieldSelect(source: ParamSource, row: InputRow, fieldName: string) {
+  const previous = row.fieldName;
+  if (fieldName === previous) return;
+  const other = draft.value.rowsBySource[source].find(item => item.key !== row.key && item.nodeId === row.nodeId && item.fieldName === fieldName);
+  if (!other) {
+    row.fieldName = fieldName;
+    onFieldChange(source, row);
+    return;
+  }
+  const mode = row.mode;
+  const fixedValue = row.fixedValue;
+  row.fieldName = other.fieldName;
+  row.mode = other.mode;
+  row.fixedValue = other.fixedValue;
+  other.fieldName = previous;
+  other.mode = mode;
+  other.fixedValue = fixedValue;
+}
+
+function onModeChange(row: InputRow) {
+  if (row.mode === "original" || row.mode === "fixed" && row.fixedValue === undefined) row.fixedValue = workflowValue(row.nodeId, row.fieldName);
+}
+
+function setRowFixedValue(row: InputRow, value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") row.fixedValue = value;
 }
 
 function onNodeChange(source: ParamSource, row: InputRow) {
   const inputs = fieldsOf(row.nodeId);
-  if (!inputs.length) return;
+  if (!inputs.length) {
+    if (row.mode === "fixed") row.fixedValue = undefined;
+    return;
+  }
   const used = usedPairs(row);
   const current = inputs.find(input => input.name === row.fieldName);
-  if (current && !used.has(pairKey(row.nodeId, current.name))) return;
-  const next = inputs.find(input => input.valueType === preferredType(source) && !used.has(pairKey(row.nodeId, input.name)))
-    ?? inputs.find(input => !used.has(pairKey(row.nodeId, input.name)));
-  row.fieldName = next?.name ?? "";
+  if (!current || used.has(pairKey(row.nodeId, current.name))) {
+    const next = inputs.find(input => input.valueType === preferredType(source) && !used.has(pairKey(row.nodeId, input.name)))
+      ?? inputs.find(input => !used.has(pairKey(row.nodeId, input.name)));
+    row.fieldName = next?.name ?? "";
+  }
+  onFieldChange(source, row);
+}
+
+function onNodeGroupChange(source: ParamSource, rows: InputRow[]) {
+  const first = rows[0];
+  if (!first?.nodeId) return;
+  const removed = new Set(rows.slice(1).map(row => row.key));
+  draft.value.rowsBySource[source] = draft.value.rowsBySource[source].filter(row => !removed.has(row.key));
+  onNodeChange(source, first);
+  addMissingNodeFields(source, first.nodeId);
+}
+
+function addMissingNodeFields(source: ParamSource, nodeId: string) {
+  const node = nodes.value.find(item => item.nodeId === nodeId);
+  if (!node) return;
+  const defaults = draft.value.defaultNodes.find(item => item.nodeId === nodeId);
+  const saved = savedDefaultValues.get(nodeId);
+  for (const input of node.inputs) {
+    if (usedPairs().has(pairKey(nodeId, input.name))) continue;
+    const value = defaults?.values[input.name] ?? saved?.[input.name] ?? input.value;
+    const mode = defaults?.originalFields.includes(input.name) ? "original" : "fixed";
+    draft.value.rowsBySource[source].push({ key: rowKey(), nodeId, fieldName: input.name, mode, fixedValue: value });
+    if (defaults) delete defaults.values[input.name];
+    if (defaults) defaults.originalFields = defaults.originalFields.filter(name => name !== input.name);
+    if (saved) delete saved[input.name];
+  }
+  for (const row of Object.values(draft.value.rowsBySource).flat()) {
+    if (row.nodeId !== nodeId) continue;
+    if (defaults) delete defaults.values[row.fieldName];
+    if (defaults) defaults.originalFields = defaults.originalFields.filter(name => name !== row.fieldName);
+    if (saved) delete saved[row.fieldName];
+  }
+  if (defaults && !Object.keys(defaults.values).length && !defaults.originalFields.length) removeDefaultNode(defaults);
+}
+
+function groupedRows(source: ParamSource) {
+  const groups = new Map<string, InputRow[]>();
+  for (const row of draft.value.rowsBySource[source]) {
+    const key = row.nodeId || row.key;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+  return [...groups].map(([key, rows]) => ({ key, rows }));
 }
 
 function addRow(source: ParamSource) {
-  const pair = firstAvailablePair(source);
+  const pair = firstAvailablePair(source, nodeTypeFilters.value[source]);
   if (!pair) {
     formError.value = "没有可添加的节点参数；如需复用，请先删除其它分组中的对应行";
     return;
   }
   formError.value = "";
-  draft.value.rowsBySource[source].push({ key: rowKey(), nodeId: pair.node.nodeId, fieldName: pair.field.name, disabled: false });
+  const mode = pair.field.valueType === preferredType(source) ? "frontend" : "fixed";
+  draft.value.rowsBySource[source].push({ key: rowKey(), nodeId: pair.node.nodeId, fieldName: pair.field.name, mode, fixedValue: pair.field.value });
+  addMissingNodeFields(source, pair.node.nodeId);
 }
 
-function removeRow(source: ParamSource, index: number) {
-  draft.value.rowsBySource[source].splice(index, 1);
+function removeNodeGroup(source: ParamSource, groupRows: InputRow[]) {
+  const keys = new Set(groupRows.map(row => row.key));
+  draft.value.rowsBySource[source] = draft.value.rowsBySource[source].filter(row => !keys.has(row.key));
 }
 
-function moveRow(source: ParamSource, index: number, offset: number) {
-  const rows = draft.value.rowsBySource[source];
-  const target = index + offset;
-  if (target < 0 || target >= rows.length) return;
-  const [row] = rows.splice(index, 1);
-  if (row) rows.splice(target, 0, row);
+function outputNodeChoices(row?: OutputRow, nodeType = "") {
+  return nodeOptions.value.filter(node => (!nodeType || node.classType === nodeType)
+    && !draft.value.outputRows.some(item => item.key !== row?.key && item.nodeId === node.nodeId));
 }
 
-function outputNodeChoices(row?: OutputRow) {
-  return nodeOptions.value.filter(node => !draft.value.outputRows.some(item => item.key !== row?.key && item.nodeId === node.nodeId));
-}
-
-const canAddOutput = computed(() => outputNodeChoices().length > 0);
+const canAddOutput = computed(() => outputNodeChoices(undefined, nodeTypeFilters.value.output).length > 0);
 
 function addOutputRow() {
-  const node = outputNodeChoices()[0];
+  const node = outputNodeChoices(undefined, nodeTypeFilters.value.output)[0];
   if (!node) return;
   draft.value.outputRows.push({ key: rowKey(), nodeId: node.nodeId });
 }
@@ -820,6 +982,25 @@ function moveOutputRow(index: number, offset: number) {
 
 function labelForSource(source: InputSource) {
   return presetGroups.value.find(item => item.source === source)?.label ?? sourceLabels[source];
+}
+
+function validateSelectorValue(nodeId: string, fieldName: string, value: DefaultValue) {
+  if (value === "None") return;
+  if (nodeOptions.value.find(item => item.nodeId === nodeId)?.classType !== "ResolutionSelector") return;
+  if (fieldName === "megapixels" && (typeof value !== "number" || !Number.isFinite(value) || value < 0.1 || value > 16)) throw new Error("megapixels 须在 0.1–16 之间");
+  if (fieldName === "multiple" && (typeof value !== "number" || !Number.isInteger(value) || value < 8 || value > 128 || value % 4 !== 0)) throw new Error("multiple 须为 8–128 之间的 4 的倍数");
+}
+
+function fixedValueForRow(row: InputRow, source: ParamSource): DefaultValue {
+  const raw = row.fixedValue;
+  if (raw === undefined) throw new Error(`参数「${labelForSource(source)} · ${row.fieldName}」缺少固定值`);
+  const valueType = fieldValueType(row);
+  if (valueType === "number" && typeof raw === "string" && !raw.trim()) throw new Error(`${row.fieldName} 须为有效数字`);
+  const value = valueType === "number" && raw !== "None" ? Number(raw) : raw;
+  if (valueType === "number" && raw !== "None" && !Number.isFinite(value)) throw new Error(`${row.fieldName} 须为有效数字`);
+  if (valueType === "boolean" && raw !== "None" && typeof value !== "boolean") throw new Error(`${row.fieldName} 须为布尔值`);
+  validateSelectorValue(row.nodeId, row.fieldName, value);
+  return value;
 }
 
 function confirmModel() {
@@ -846,8 +1027,10 @@ function confirmModel() {
         const key = pairKey(nodeId, fieldName);
         if (seen.has(key)) throw new Error(`节点 #${nodeId} 的字段 ${fieldName} 被重复绑定`);
         seen.add(key);
-        const field: BindingField = { fieldName, source };
-        if (row.disabled) field.disabled = true;
+        if (row.mode === "frontend" && !canUseFrontend(source, row)) throw new Error(`节点 #${nodeId} 的字段 ${fieldName} 不支持前端设置`);
+        const field: BindingField = row.mode === "frontend" ? { fieldName, source }
+          : row.mode === "original" ? { fieldName, source: "original", inputSource: source }
+            : { fieldName, source: "fixed", inputSource: source, value: fixedValueForRow(row, source) };
         bindings.push({ role: "input", nodeId, fields: [field] });
       });
     }
@@ -860,9 +1043,20 @@ function confirmModel() {
       defaultNodeIds.add(nodeId);
       for (const field of defaultFields(node)) {
         if (field.used) continue;
-        const value = node.values[field.name];
-        if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") throw new Error(`默认参数「${nodeLabel(nodeId)} · ${field.name}」缺少有效数值`);
         const key = pairKey(nodeId, field.name);
+        if (node.originalFields.includes(field.name)) {
+          if (!seen.has(key)) {
+            seen.add(key);
+            bindings.push({ role: "input", nodeId, fields: [{ fieldName: field.name, source: "original" }] });
+          }
+          continue;
+        }
+        const raw = node.values[field.name];
+        if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") throw new Error(`默认参数「${nodeLabel(nodeId)} · ${field.name}」缺少有效数值`);
+        if (field.valueType === "number" && typeof raw === "string" && !raw.trim()) throw new Error(`${field.name} 须为有效数字`);
+        const value = field.valueType === "number" && raw !== "None" ? Number(raw) : raw;
+        if (field.valueType === "number" && raw !== "None" && !Number.isFinite(value)) throw new Error(`${field.name} 须为有效数字`);
+        validateSelectorValue(nodeId, field.name, value);
         if (seen.has(key)) continue;
         seen.add(key);
         bindings.push({ role: "input", nodeId, fields: [{ fieldName: field.name, source: "fixed", value }] });
@@ -907,8 +1101,7 @@ function confirmModel() {
         });
       }
       const ratios = derivedVideoRatios.value;
-      if (ratios.length) value.videoRatios = ratios;
-      else if (!draft.value.rowsBySource.ratio.length) Reflect.deleteProperty(value, "videoRatios");
+      value.videoRatios = ratios;
     } else {
       Reflect.deleteProperty(value, "videoRatios");
     }
@@ -1004,12 +1197,8 @@ function confirmModel() {
 
     .paramGroup {
       padding-top: 10px;
-      border-top: 1px dashed var(--el-border-color-lighter);
 
-      &:first-of-type {
-        padding-top: 0;
-        border-top: 0;
-      }
+      &:first-of-type { padding-top: 0; }
     }
 
     .paramHeader {
@@ -1025,81 +1214,82 @@ function confirmModel() {
       font-weight: 600;
     }
 
+    .addNodeControls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .nodeTypeSelect { width: 160px; }
+      .el-button { flex-shrink: 0; }
+    }
+
     .paramRows {
       display: flex;
       flex-direction: column;
       gap: 8px;
+      overflow-x: auto;
+    }
+
+    .paramNode {
+      min-width: 660px;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: var(--el-border-radius-base);
     }
 
     .paramRow {
       display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) auto auto;
+      grid-template-columns: minmax(160px, 1.15fr) minmax(130px, 1fr) 116px minmax(150px, 0.9fr) 32px;
       align-items: center;
       gap: 8px;
       padding: 8px;
-      border: 1px solid var(--el-border-color-lighter);
-      border-radius: var(--el-border-radius-base);
 
-      &.rowDisabled { background: var(--el-fill-color-lighter); }
+      &.outputRow {
+        grid-template-columns: minmax(0, 1fr) auto;
+        border: 1px solid var(--el-border-color-lighter);
+        border-radius: var(--el-border-radius-base);
 
-      &.outputRow { grid-template-columns: minmax(0, 1fr) auto; }
+        .rowActions { grid-column: 2; }
+      }
 
-      .nodeSelect, .fieldSelect { min-width: 0; }
+      .nodeSelect, .fieldSelect, .modeSelect { min-width: 0; }
+      .nodeSpacer { grid-column: 1; }
 
       .rowMeta {
-        grid-column: 1 / -1;
+        grid-column: 2 / -1;
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         min-width: 0;
       }
 
+      .fixedValue {
+        grid-column: 4;
+        grid-row: 1;
+        min-width: 0;
+      }
+
       .rowActions {
+        grid-column: 5;
+        grid-row: 1;
         display: flex;
         flex-shrink: 0;
+
+        .el-button { width: 32px; padding: 0; }
       }
     }
 
     .emptyGroup { display: block; padding: 2px 0 4px; }
 
-    .defaultNode {
-      padding: 8px;
-      border: 1px solid var(--el-border-color-lighter);
-      border-radius: var(--el-border-radius-base);
+    .defaultParamRow {
+      .defaultUsed { grid-column: 3 / 5; }
 
-      & + .defaultNode { margin-top: 8px; }
-
-      .defaultNodeHeader {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
-
-        .el-select { flex: 1; min-width: 0; }
-        .el-button { flex-shrink: 0; }
+      .defaultValue {
+        grid-column: 4;
+        grid-row: 1;
+        min-width: 0;
       }
 
-      .defaultFields {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .defaultField {
-        display: grid;
-        grid-template-columns: minmax(110px, 0.9fr) minmax(0, 1.3fr) auto;
-        align-items: center;
-        gap: 8px;
-
-        &.fieldDisabled { opacity: 0.75; }
-
-        .defaultFieldName {
-          overflow: hidden;
-          font-size: 12px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-      }
+      .rowMeta { grid-column: 2 / 5; }
     }
   }
 
@@ -1120,16 +1310,26 @@ function confirmModel() {
   }
 }
 
-.formError { margin-top: 12px; }
+.dialogFooter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 
-@media (max-width: 720px) {
-  .dialogContent .paramSection .paramRow {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  .footerErrors {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
 
-    .rowActions {
-      grid-column: 1 / -1;
-      justify-self: end;
-    }
+    .el-text { display: block; }
+  }
+
+  .footerActions {
+    display: flex;
+    gap: 12px;
+    margin-left: auto;
+
+    .el-button + .el-button { margin-left: 0; }
   }
 }
 </style>

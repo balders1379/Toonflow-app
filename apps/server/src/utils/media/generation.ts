@@ -50,8 +50,8 @@ export async function listMediaModels(): Promise<MediaModel[]> {
         imageRatios: imageOptions(Array.isArray(model.imageRatios) ? model.imageRatios : builtIn?.imageRatios, /^[1-9]\d{0,3}:[1-9]\d{0,3}$/),
       } : {}),
       ...(model.type === "video" ? (() => {
-        const videoRatios = optionLabels(Array.isArray(model.videoRatios) ? model.videoRatios : builtIn?.videoRatios);
-        return videoRatios?.length ? { videoRatios } : {};
+        const videoRatios = optionLabels(Array.isArray(model.videoRatios) ? model.videoRatios : Array.isArray(model.bindings) ? [] : builtIn?.videoRatios);
+        return videoRatios ? { videoRatios } : {};
       })() : {}),
     } as MediaModel];
   }));

@@ -166,6 +166,7 @@ async function saveModels() {
     revision.value = data.data.revision;
     modelsSaved = true;
     invalidateNodeModels("media");
+    window.dispatchEvent(new Event("toonflow:provider-config-changed"));
     await saveSettings(settings => {
       const configs = settings.mediaProviderConfigs as Record<string, Record<string, unknown>> | undefined;
       if (configs !== undefined && (!configs || typeof configs !== "object" || Array.isArray(configs))) throw new Error("媒体供应商配置格式无效");

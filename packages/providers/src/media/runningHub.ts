@@ -92,7 +92,8 @@ type InputSource =
   | "ratio"
   | "duration"
   | "resolution"
-  | "fixed";
+  | "fixed"
+  | "original";
 
 type BindingField = {
   fieldName: string;
@@ -615,6 +616,12 @@ async function runWorkflow(context: Context, request: ImageRequest | VideoReques
     for (const field of fields) {
       const fieldName = typeof field.fieldName === "string" ? field.fieldName.trim() : "";
       if (!fieldName) throw new Error("RunningHub 输入绑定缺少字段名");
+      if (field.source === "original") {
+        const key = nodeId + "|" + fieldName;
+        if (seen.has(key)) throw new Error("RunningHub 节点字段被重复绑定：" + nodeId + "." + fieldName);
+        seen.add(key);
+        continue;
+      }
       // ACT: None 行只写入 "None" 禁用该输入，不消费参考素材，也不产生上传。
       if (field.disabled === true) {
         const key = nodeId + "|" + fieldName;
@@ -625,10 +632,8 @@ async function runWorkflow(context: Context, request: ImageRequest | VideoReques
       }
       let fieldValue: string | number | boolean | undefined;
       let mediaInput: MediaInput | undefined;
-      let mediaSource = true;
       switch (field.source) {
         case "prompt":
-          mediaSource = false;
           fieldValue = mediaType === "audio" ? input.text ?? input.prompt : input.prompt;
           break;
         case "image":
@@ -647,19 +652,15 @@ async function runWorkflow(context: Context, request: ImageRequest | VideoReques
           mediaInput = audioIndex < audios.length ? audios[audioIndex++] : undefined;
           break;
         case "ratio":
-          mediaSource = false;
           fieldValue = input.ratio;
           break;
         case "duration":
-          mediaSource = false;
           fieldValue = input.duration;
           break;
         case "resolution":
-          mediaSource = false;
           fieldValue = input.resolution;
           break;
         case "fixed":
-          mediaSource = false;
           if (typeof field.value === "string" || typeof field.value === "number" || typeof field.value === "boolean") {
             fieldValue = field.value;
           } else {
@@ -674,9 +675,9 @@ async function runWorkflow(context: Context, request: ImageRequest | VideoReques
         fieldValue = cached ?? await uploadMedia(context, apiKey, base, mediaInput, signal);
         if (!cached) uploadedMedia.set(mediaInput, fieldValue);
       }
-      // ACT: 素材绑定没有对应素材时写入 None 禁用该节点，避免沿用工作流自带的默认素材。
-      if (mediaSource && !fieldValue) fieldValue = "None";
-      if (fieldValue === undefined || fieldValue === "") continue;
+      // ACT: 前端设置未传值时写入 None，避免沿用工作流默认输入；固定空字符串仍原样提交。
+      if (field.source !== "fixed" && (fieldValue == null || fieldValue === "")) fieldValue = "None";
+      if (fieldValue === undefined) continue;
       const key = nodeId + "|" + fieldName;
       if (seen.has(key)) throw new Error("RunningHub 节点字段被重复绑定：" + nodeId + "." + fieldName);
       seen.add(key);
